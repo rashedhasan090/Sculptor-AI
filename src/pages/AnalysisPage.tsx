@@ -10,7 +10,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+// import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Brain, Loader2, Play, BarChart3, Database, Settings2, Sparkles, Key, AlertCircle } from "lucide-react";
 
@@ -50,7 +50,7 @@ export function AnalysisPage() {
   const totalSelected = selectedAlgorithms.length + selectedLlms.length;
 
   // Check if API keys are provided for selected LLMs
-  const missingKeys = [];
+  const missingKeys: string[] = [];
   if (llmModels.gpt4 && !openaiKey) missingKeys.push("OpenAI");
   if (llmModels.claude && !anthropicKey) missingKeys.push("Anthropic");
   if (llmModels.gemini && !geminiKey) missingKeys.push("Google");
