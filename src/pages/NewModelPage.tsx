@@ -360,6 +360,34 @@ function getAvailableVisionProviders(): VisionProvider[] {
   return providers;
 }
 
+function cleanApiError(raw: string, providerName: string): string {
+  // Extract the useful part of verbose API errors
+  if (/quota/i.test(raw) || /rate.limit/i.test(raw) || /exceeded/i.test(raw)) {
+    return `${providerName} quota/rate limit exceeded`;
+  }
+  if (/invalid.*key/i.test(raw) || /auth/i.test(raw) || /401/i.test(raw)) {
+    return `${providerName} API key is invalid`;
+  }
+  if (/billing/i.test(raw) || /payment/i.test(raw)) {
+    return `${providerName} billing issue — check your plan`;
+  }
+  // Truncate long errors
+  const short = raw.length > 80 ? raw.slice(0, 80) + "…" : raw;
+  return `${providerName}: ${short}`;
+}
+
+function suggestAlternateProviders(providers: VisionProvider[]): string {
+  const configured = new Set(providers.map(p => p.name));
+  const missing: string[] = [];
+  if (!configured.has("OpenAI GPT-4o")) missing.push("OpenAI");
+  if (!configured.has("Claude")) missing.push("Anthropic");
+  if (!configured.has("Gemini")) missing.push("Gemini");
+  if (missing.length > 0) {
+    return ` Add a ${missing.join(" or ")} key in Settings as backup.`;
+  }
+  return " All configured providers failed — check your API keys.";
+}
+
 function extractBase64FromDataUrl(dataUrl: string): { base64: string; mimeType: string } {
   const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
   if (!match) throw new Error("Invalid data URL");
@@ -494,6 +522,7 @@ export function NewModelPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProvider, setAnalysisProvider] = useState<string>("");
   const [visionExtracted, setVisionExtracted] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string>("");
 
   const createModel = useMutation(api.objectModels.createModel);
   const navigate = useNavigate();
@@ -531,7 +560,8 @@ export function NewModelPage() {
     }
 
     setIsAnalyzing(true);
-    let lastError = "";
+    setAnalysisError("");
+    const failedProviders: string[] = [];
 
     for (const provider of providers) {
       try {
@@ -540,7 +570,6 @@ export function NewModelPage() {
         const result = await provider.fn(base64, mimeType, provider.key);
 
         if (result.trim()) {
-          // Clean up the result — remove markdown fences if present
           let cleaned = result.trim();
           cleaned = cleaned.replace(/^```[\w]*\n?/gm, "").replace(/```$/gm, "").trim();
 
@@ -548,25 +577,28 @@ export function NewModelPage() {
           setEffectiveType("text");
           setImageDescription(cleaned);
           setVisionExtracted(true);
+          setAnalysisError("");
           toast.success(`Class diagram analyzed with ${provider.name}!`, { duration: 4000 });
           setIsAnalyzing(false);
           setAnalysisProvider("");
           return;
         }
       } catch (err) {
-        lastError = err instanceof Error ? err.message : String(err);
-        console.warn(`Vision analysis failed with ${provider.name}:`, lastError);
+        const rawMsg = err instanceof Error ? err.message : String(err);
+        failedProviders.push(cleanApiError(rawMsg, provider.name));
+        console.warn(`Vision analysis failed with ${provider.name}:`, rawMsg);
         continue;
       }
     }
 
     setIsAnalyzing(false);
     setAnalysisProvider("");
-    toast.error(`AI analysis failed: ${lastError}. You can still describe the model manually.`, { duration: 6000 });
+    const errSummary = failedProviders.join(". ") + "." + suggestAlternateProviders(providers);
+    setAnalysisError(errSummary);
+    toast.error("AI analysis failed — see details below. You can still describe the model manually.", { duration: 5000 });
   };
 
   const handleAnalyzeUrlImage = async (imageUrl: string) => {
-    // For URL images, try to fetch and convert to data URL first
     const providers = getAvailableVisionProviders();
     if (providers.length === 0) {
       toast.error("No AI API key found. Add an OpenAI, Anthropic, or Gemini key in Settings.", { duration: 6000 });
@@ -574,7 +606,8 @@ export function NewModelPage() {
     }
 
     setIsAnalyzing(true);
-    let lastError = "";
+    setAnalysisError("");
+    const failedProviders: string[] = [];
 
     for (const provider of providers) {
       try {
@@ -618,6 +651,7 @@ export function NewModelPage() {
             setEffectiveType("text");
             setImageDescription(cleaned);
             setVisionExtracted(true);
+            setAnalysisError("");
             toast.success(`Class diagram analyzed with ${provider.name}!`);
             setIsAnalyzing(false);
             setAnalysisProvider("");
@@ -643,6 +677,7 @@ export function NewModelPage() {
               setEffectiveType("text");
               setImageDescription(cleaned);
               setVisionExtracted(true);
+              setAnalysisError("");
               toast.success(`Class diagram analyzed with ${provider.name}!`);
               setIsAnalyzing(false);
               setAnalysisProvider("");
@@ -653,15 +688,18 @@ export function NewModelPage() {
           throw new Error("Could not fetch image for analysis");
         }
       } catch (err) {
-        lastError = err instanceof Error ? err.message : String(err);
-        console.warn(`Vision analysis failed with ${provider.name}:`, lastError);
+        const rawMsg = err instanceof Error ? err.message : String(err);
+        failedProviders.push(cleanApiError(rawMsg, provider.name));
+        console.warn(`Vision analysis failed with ${provider.name}:`, rawMsg);
         continue;
       }
     }
 
     setIsAnalyzing(false);
     setAnalysisProvider("");
-    toast.error(`AI analysis failed: ${lastError}`, { duration: 6000 });
+    const errSummary = failedProviders.join(". ") + "." + suggestAlternateProviders(providers);
+    setAnalysisError(errSummary);
+    toast.error("AI analysis failed — see details below. You can still describe the model manually.", { duration: 5000 });
   };
 
   /* ── file upload handling ── */
@@ -1009,7 +1047,7 @@ export function NewModelPage() {
                       {!visionExtracted && (
                         <div className="space-y-2">
                           <Button
-                            onClick={() => handleAnalyzeImage(uploadedImage)}
+                            onClick={() => { setAnalysisError(""); handleAnalyzeImage(uploadedImage); }}
                             disabled={isAnalyzing}
                             className="w-full bg-gradient-to-r from-violet-600 to-emerald-600 hover:from-violet-700 hover:to-emerald-700 h-11"
                           >
@@ -1021,12 +1059,18 @@ export function NewModelPage() {
                             ) : (
                               <>
                                 <BrainCircuit className="size-4 mr-2" />
-                                Analyze Class Diagram with AI
+                                {analysisError ? "Retry Analysis" : "Analyze Class Diagram with AI"}
                                 <Wand2 className="size-4 ml-2" />
                               </>
                             )}
                           </Button>
-                          {!hasAnyKey && (
+                          {analysisError && (
+                            <div className="flex items-start gap-2 text-xs text-red-400/90 bg-red-500/10 border border-red-500/20 rounded-lg p-2.5">
+                              <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
+                              <span>{analysisError}</span>
+                            </div>
+                          )}
+                          {!hasAnyKey && !analysisError && (
                             <div className="flex items-start gap-2 text-xs text-amber-400/80 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5">
                               <Settings className="size-3.5 mt-0.5 shrink-0" />
                               <span>
@@ -1146,7 +1190,7 @@ export function NewModelPage() {
                       {!visionExtracted && (
                         <div className="space-y-2">
                           <Button
-                            onClick={() => handleAnalyzeUrlImage(urlPreview)}
+                            onClick={() => { setAnalysisError(""); handleAnalyzeUrlImage(urlPreview); }}
                             disabled={isAnalyzing}
                             className="w-full bg-gradient-to-r from-violet-600 to-emerald-600 hover:from-violet-700 hover:to-emerald-700 h-11"
                           >
@@ -1158,12 +1202,18 @@ export function NewModelPage() {
                             ) : (
                               <>
                                 <BrainCircuit className="size-4 mr-2" />
-                                Analyze Class Diagram with AI
+                                {analysisError ? "Retry Analysis" : "Analyze Class Diagram with AI"}
                                 <Wand2 className="size-4 ml-2" />
                               </>
                             )}
                           </Button>
-                          {!hasAnyKey && (
+                          {analysisError && (
+                            <div className="flex items-start gap-2 text-xs text-red-400/90 bg-red-500/10 border border-red-500/20 rounded-lg p-2.5">
+                              <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
+                              <span>{analysisError}</span>
+                            </div>
+                          )}
+                          {!hasAnyKey && !analysisError && (
                             <div className="flex items-start gap-2 text-xs text-amber-400/80 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5">
                               <Settings className="size-3.5 mt-0.5 shrink-0" />
                               <span>
