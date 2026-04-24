@@ -9,8 +9,10 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Brain, Loader2, Play, BarChart3, Database, Settings2 } from "lucide-react";
+import { Brain, Loader2, Play, BarChart3, Database, Settings2, Sparkles, Key, AlertCircle } from "lucide-react";
 
 export function AnalysisPage() {
   const { modelId } = useParams();
@@ -23,6 +25,11 @@ export function AnalysisPage() {
     dqn: true,
     actor_critic: true,
   });
+  const [llmModels, setLlmModels] = useState({
+    gpt4: false,
+    claude: false,
+    gemini: false,
+  });
   const [episodes, setEpisodes] = useState(1000);
   const [epsilon, setEpsilon] = useState(0.3);
   const [learningRate, setLearningRate] = useState(0.1);
@@ -32,11 +39,34 @@ export function AnalysisPage() {
   const [weightConstraints, setWeightConstraints] = useState(0.30);
   const [isRunning, setIsRunning] = useState(false);
 
+  // LLM API Keys (stored in localStorage for privacy)
+  const [openaiKey, setOpenaiKey] = useState(() => localStorage.getItem("sculptor-openai-key") || "");
+  const [anthropicKey, setAnthropicKey] = useState(() => localStorage.getItem("sculptor-anthropic-key") || "");
+  const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem("sculptor-gemini-key") || "");
+  const [showApiKeys, setShowApiKeys] = useState(false);
+
   const selectedAlgorithms = Object.entries(algorithms).filter(([, v]) => v).map(([k]) => k);
+  const selectedLlms = Object.entries(llmModels).filter(([, v]) => v).map(([k]) => k);
+  const totalSelected = selectedAlgorithms.length + selectedLlms.length;
+
+  // Check if API keys are provided for selected LLMs
+  const missingKeys = [];
+  if (llmModels.gpt4 && !openaiKey) missingKeys.push("OpenAI");
+  if (llmModels.claude && !anthropicKey) missingKeys.push("Anthropic");
+  if (llmModels.gemini && !geminiKey) missingKeys.push("Google");
+
+  const saveApiKey = (provider: string, value: string) => {
+    localStorage.setItem(`sculptor-${provider}-key`, value);
+  };
 
   const handleRun = async () => {
-    if (selectedAlgorithms.length === 0) {
-      toast.error("Select at least one RL algorithm");
+    if (totalSelected === 0) {
+      toast.error("Select at least one algorithm or LLM");
+      return;
+    }
+    if (missingKeys.length > 0) {
+      toast.error(`Missing API keys: ${missingKeys.join(", ")}`);
+      setShowApiKeys(true);
       return;
     }
     if (!modelId) return;
@@ -45,7 +75,7 @@ export function AnalysisPage() {
     try {
       const runId = await createRun({
         objectModelId: modelId as Id<"objectModels">,
-        algorithms: selectedAlgorithms,
+        algorithms: [...selectedAlgorithms, ...selectedLlms.map(l => `llm_${l}`)],
         config: {
           episodes,
           epsilon,
@@ -77,7 +107,7 @@ export function AnalysisPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Configure Analysis</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Set RL parameters for <span className="text-foreground font-medium">{model.name}</span>
+          Set RL & LLM parameters for <span className="text-foreground font-medium">{model.name}</span>
         </p>
       </div>
 
@@ -107,7 +137,7 @@ export function AnalysisPage() {
       </Card>
 
       <div className="grid md:grid-cols-2 gap-6">
-        {/* Algorithm Selection */}
+        {/* RL Algorithm Selection */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -115,7 +145,7 @@ export function AnalysisPage() {
               RL Algorithms
             </CardTitle>
             <CardDescription>
-              Select which reinforcement learning agents to deploy
+              Reinforcement learning agents for Pareto-optimal exploration
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -125,18 +155,21 @@ export function AnalysisPage() {
                 name: "Monte Carlo Control",
                 desc: "Episode-based learning with ε-greedy exploration. Good for delayed rewards.",
                 color: "bg-purple-500/10 text-purple-500",
+                tag: "MC",
               },
               {
                 key: "dqn" as const,
                 name: "Deep Q-Network",
                 desc: "Neural function approximation with experience replay and target networks.",
                 color: "bg-blue-500/10 text-blue-500",
+                tag: "DQN",
               },
               {
                 key: "actor_critic" as const,
                 name: "Actor-Critic",
                 desc: "Policy-value networks with entropy regularization for stable multi-objective optimization.",
                 color: "bg-emerald-500/10 text-emerald-500",
+                tag: "A2C",
               },
             ].map(algo => (
               <div key={algo.key} className="flex items-start gap-4">
@@ -148,7 +181,7 @@ export function AnalysisPage() {
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-sm">{algo.name}</span>
                     <Badge variant="outline" className={`text-xs ${algo.color}`}>
-                      {algo.key === "monte_carlo" ? "MC" : algo.key === "dqn" ? "DQN" : "A2C"}
+                      {algo.tag}
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">{algo.desc}</p>
@@ -158,6 +191,120 @@ export function AnalysisPage() {
           </CardContent>
         </Card>
 
+        {/* LLM-Based Analysis */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="size-5 text-amber-500" />
+              LLM-Powered Analysis
+              <Badge variant="outline" className="text-xs bg-amber-500/10 text-amber-500 ml-auto">New</Badge>
+            </CardTitle>
+            <CardDescription>
+              Use large language models to reason about database design tradeoffs
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {[
+              {
+                key: "gpt4" as const,
+                name: "GPT-4o",
+                desc: "OpenAI's flagship model. Strong at multi-objective reasoning and schema generation.",
+                color: "bg-green-500/10 text-green-500",
+                tag: "OpenAI",
+              },
+              {
+                key: "claude" as const,
+                name: "Claude 3.5 Sonnet",
+                desc: "Anthropic's reasoning model. Excellent at analyzing complex DB tradeoffs.",
+                color: "bg-orange-500/10 text-orange-500",
+                tag: "Anthropic",
+              },
+              {
+                key: "gemini" as const,
+                name: "Gemini 2.0 Pro",
+                desc: "Google's multimodal model. Fast inference with strong code understanding.",
+                color: "bg-sky-500/10 text-sky-500",
+                tag: "Google",
+              },
+            ].map(llm => (
+              <div key={llm.key} className="flex items-start gap-4">
+                <Switch
+                  checked={llmModels[llm.key]}
+                  onCheckedChange={v => setLlmModels(prev => ({ ...prev, [llm.key]: v }))}
+                />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">{llm.name}</span>
+                    <Badge variant="outline" className={`text-xs ${llm.color}`}>
+                      {llm.tag}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">{llm.desc}</p>
+                </div>
+              </div>
+            ))}
+
+            {selectedLlms.length > 0 && (
+              <div className="mt-4 pt-4 border-t">
+                <button
+                  onClick={() => setShowApiKeys(!showApiKeys)}
+                  className="flex items-center gap-2 text-sm text-amber-500 hover:text-amber-400 transition-colors"
+                >
+                  <Key className="size-4" />
+                  {showApiKeys ? "Hide" : "Configure"} API Keys
+                </button>
+
+                {showApiKeys && (
+                  <div className="mt-3 space-y-3">
+                    {llmModels.gpt4 && (
+                      <div>
+                        <Label className="text-xs">OpenAI API Key</Label>
+                        <Input
+                          type="password"
+                          placeholder="sk-..."
+                          value={openaiKey}
+                          onChange={e => { setOpenaiKey(e.target.value); saveApiKey("openai", e.target.value); }}
+                          className="mt-1 font-mono text-xs"
+                        />
+                      </div>
+                    )}
+                    {llmModels.claude && (
+                      <div>
+                        <Label className="text-xs">Anthropic API Key</Label>
+                        <Input
+                          type="password"
+                          placeholder="sk-ant-..."
+                          value={anthropicKey}
+                          onChange={e => { setAnthropicKey(e.target.value); saveApiKey("anthropic", e.target.value); }}
+                          className="mt-1 font-mono text-xs"
+                        />
+                      </div>
+                    )}
+                    {llmModels.gemini && (
+                      <div>
+                        <Label className="text-xs">Google AI API Key</Label>
+                        <Input
+                          type="password"
+                          placeholder="AIza..."
+                          value={geminiKey}
+                          onChange={e => { setGeminiKey(e.target.value); saveApiKey("gemini", e.target.value); }}
+                          className="mt-1 font-mono text-xs"
+                        />
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      <AlertCircle className="size-3" />
+                      Keys are stored locally in your browser — never sent to our servers.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-6">
         {/* Hyperparameters */}
         <Card>
           <CardHeader>
@@ -166,7 +313,7 @@ export function AnalysisPage() {
               Hyperparameters
             </CardTitle>
             <CardDescription>
-              Fine-tune the learning process
+              Fine-tune the RL learning process
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -200,22 +347,19 @@ export function AnalysisPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
 
-      {/* Objective Weights */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <BarChart3 className="size-5 text-emerald-500" />
-            Reward Weights
-          </CardTitle>
-          <CardDescription>
-            Balance strategy effectiveness, performance, and constraint satisfaction
-            (w_strategy = {weightStrategy.toFixed(2)}, w_performance = {weightPerformance.toFixed(2)}, w_constraints = {weightConstraints.toFixed(2)})
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid md:grid-cols-3 gap-6">
+        {/* Objective Weights */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BarChart3 className="size-5 text-emerald-500" />
+              Reward Weights
+            </CardTitle>
+            <CardDescription>
+              Balance strategy, performance, and constraint satisfaction
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
             <div>
               <div className="flex justify-between mb-2">
                 <Label className="text-xs">Strategy Weight</Label>
@@ -237,14 +381,21 @@ export function AnalysisPage() {
               </div>
               <Slider value={[weightConstraints * 100]} onValueChange={v => setWeightConstraints(v[0] / 100)} min={0} max={100} step={5} />
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Run button */}
+      {missingKeys.length > 0 && selectedLlms.length > 0 && (
+        <div className="flex items-center gap-2 text-amber-500 text-sm bg-amber-500/10 rounded-lg p-3">
+          <AlertCircle className="size-4 shrink-0" />
+          <span>Missing API keys for: {missingKeys.join(", ")}. Configure them above before running.</span>
+        </div>
+      )}
+
       <Button
         onClick={handleRun}
-        disabled={isRunning || selectedAlgorithms.length === 0}
+        disabled={isRunning || totalSelected === 0}
         className="w-full bg-emerald-600 hover:bg-emerald-700 h-12 text-base"
       >
         {isRunning ? (
@@ -255,7 +406,7 @@ export function AnalysisPage() {
         ) : (
           <>
             <Play className="size-5 mr-2" />
-            Run Pareto Analysis ({selectedAlgorithms.length} algorithm{selectedAlgorithms.length > 1 ? "s" : ""} · {episodes} episodes)
+            Run Pareto Analysis ({selectedAlgorithms.length} RL + {selectedLlms.length} LLM · {episodes} episodes)
           </>
         )}
       </Button>

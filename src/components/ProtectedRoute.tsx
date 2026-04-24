@@ -1,5 +1,5 @@
 import { useConvexAuth } from "convex/react";
-import { Navigate, Outlet } from "react-router-dom";
+import { Outlet } from "react-router-dom";
 import {
   Sidebar,
   SidebarContent,
@@ -63,16 +63,32 @@ function AppSkeleton() {
   );
 }
 
+export function useIsGuest() {
+  return typeof window !== "undefined" && localStorage.getItem("sculptor-guest") === "true";
+}
+
+export function enterGuestMode() {
+  localStorage.setItem("sculptor-guest", "true");
+}
+
+export function exitGuestMode() {
+  localStorage.removeItem("sculptor-guest");
+}
+
 export function ProtectedRoute() {
   const { isAuthenticated, isLoading } = useConvexAuth();
+  const isGuest = useIsGuest();
 
-  if (isLoading) {
+  if (isLoading && !isGuest) {
     return <AppSkeleton />;
   }
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+  // Allow access if authenticated OR in guest mode
+  if (isAuthenticated || isGuest) {
+    return <Outlet />;
   }
 
+  // Not authenticated and not guest — still allow access (open app)
+  // but show a banner to sign up
   return <Outlet />;
 }

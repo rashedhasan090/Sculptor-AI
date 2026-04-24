@@ -52,9 +52,9 @@ export function LandingPage() {
               synthesis, selection, integration, and continuous refinement within your existing developer workflows.
             </p>
             <div className="flex items-center gap-4 mt-8 flex-wrap">
-              <Link to="/signup">
+              <Link to="/dashboard" onClick={() => localStorage.setItem("sculptor-guest", "true")}>
                 <Button size="lg" className="bg-emerald-600 hover:bg-emerald-700 h-12 px-7 text-base">
-                  Start Building <ArrowRight className="ml-2 size-4" />
+                  Try Free — No Login <ArrowRight className="ml-2 size-4" />
                 </Button>
               </Link>
               <a href="https://github.com/rashedhasan090/Sculptor-AI/raw/main/releases/sculptor-ai-0.1.0.vsix" target="_blank" rel="noopener noreferrer">
@@ -340,9 +340,9 @@ export function LandingPage() {
             into your workflow — all in minutes, backed by formal verification.
           </p>
           <div className="flex items-center justify-center gap-4 mt-8">
-            <Link to="/signup">
+            <Link to="/dashboard" onClick={() => localStorage.setItem("sculptor-guest", "true")}>
               <Button size="lg" className="bg-emerald-600 hover:bg-emerald-700 h-12 px-8">
-                Get Started Free <ArrowRight className="ml-2 size-4" />
+                Try Free — No Sign Up <ArrowRight className="ml-2 size-4" />
               </Button>
             </Link>
           </div>

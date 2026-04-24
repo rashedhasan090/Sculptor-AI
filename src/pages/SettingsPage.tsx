@@ -1,6 +1,6 @@
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useMutation, useQuery } from "convex/react";
-import { ChevronRight, Loader2, Moon, Palette, Sun, User } from "lucide-react";
+import { ChevronRight, Key, Loader2, Moon, Palette, Sparkles, Sun, User } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -199,6 +199,46 @@ export function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* LLM API Keys */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <div className="size-8 rounded-full bg-amber-500/10 flex items-center justify-center">
+              <Key className="size-4 text-amber-500" />
+            </div>
+            <div>
+              <span className="text-base">LLM API Keys</span>
+              <p className="text-xs text-muted-foreground font-normal mt-0.5">
+                Provide your own API keys to use LLM-powered analysis. Keys are stored locally in your browser.
+              </p>
+            </div>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <ApiKeyField
+            label="OpenAI API Key"
+            placeholder="sk-..."
+            storageKey="sculptor-openai-key"
+            icon={<Sparkles className="size-4 text-green-500" />}
+            description="Required for GPT-4o analysis"
+          />
+          <ApiKeyField
+            label="Anthropic API Key"
+            placeholder="sk-ant-..."
+            storageKey="sculptor-anthropic-key"
+            icon={<Sparkles className="size-4 text-orange-500" />}
+            description="Required for Claude 3.5 Sonnet analysis"
+          />
+          <ApiKeyField
+            label="Google AI API Key"
+            placeholder="AIza..."
+            storageKey="sculptor-gemini-key"
+            icon={<Sparkles className="size-4 text-sky-500" />}
+            description="Required for Gemini 2.0 Pro analysis"
+          />
+        </CardContent>
+      </Card>
+
       <Dialog open={changePasswordOpen} onOpenChange={setChangePasswordOpen}>
         <DialogContent>
           <DialogHeader>
@@ -332,6 +372,59 @@ export function SettingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function ApiKeyField({ label, placeholder, storageKey, icon, description }: {
+  label: string;
+  placeholder: string;
+  storageKey: string;
+  icon: React.ReactNode;
+  description: string;
+}) {
+  const [value, setValue] = useState(() => localStorage.getItem(storageKey) || "");
+  const [show, setShow] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = (v: string) => {
+    setValue(v);
+    if (v) {
+      localStorage.setItem(storageKey, v);
+    } else {
+      localStorage.removeItem(storageKey);
+    }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  return (
+    <div className="flex items-start gap-3 p-3 rounded-lg border bg-muted/30">
+      <div className="mt-0.5">{icon}</div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between">
+          <Label className="text-sm font-medium">{label}</Label>
+          {saved && <span className="text-xs text-emerald-500">Saved ✓</span>}
+        </div>
+        <p className="text-xs text-muted-foreground mb-2">{description}</p>
+        <div className="flex gap-2">
+          <Input
+            type={show ? "text" : "password"}
+            placeholder={placeholder}
+            value={value}
+            onChange={e => handleSave(e.target.value)}
+            className="font-mono text-xs flex-1"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShow(!show)}
+            className="shrink-0"
+          >
+            {show ? "Hide" : "Show"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

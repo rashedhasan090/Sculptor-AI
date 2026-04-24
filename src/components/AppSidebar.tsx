@@ -1,6 +1,6 @@
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useQuery } from "convex/react";
-import { LayoutDashboard, LogOut, Moon, Settings, Sun, Plus, FlaskConical, Database, BookOpen, BarChart3 } from "lucide-react";
+import { LayoutDashboard, LogOut, Moon, Settings, Sun, Plus, FlaskConical, Database, BookOpen, BarChart3, User } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useTheme } from "@/contexts/ThemeContext";
 import { api } from "../../convex/_generated/api";
@@ -108,6 +108,7 @@ function SidebarUserMenu() {
   const { signOut } = useAuthActions();
   const { theme, toggleTheme, switchable } = useTheme();
   const { setOpenMobile } = useSidebar();
+  const isGuest = typeof window !== "undefined" && localStorage.getItem("sculptor-guest") === "true";
 
   return (
     <SidebarFooter className="border-t border-sidebar-border">
@@ -118,15 +119,15 @@ function SidebarUserMenu() {
               <SidebarMenuButton size="lg">
                 <Avatar className="size-8">
                   <AvatarFallback className="bg-emerald-600 text-white text-sm font-medium">
-                    {user?.name?.charAt(0).toUpperCase() || "U"}
+                    {isGuest ? "G" : (user?.name?.charAt(0).toUpperCase() || "U")}
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex flex-col items-start text-left">
                   <span className="text-sm font-medium truncate">
-                    {user?.name || "User"}
+                    {isGuest ? "Guest User" : (user?.name || "User")}
                   </span>
                   <span className="text-xs text-muted-foreground truncate">
-                    {user?.email}
+                    {isGuest ? "Free trial — no login" : user?.email}
                   </span>
                 </div>
               </SidebarMenuButton>
@@ -153,13 +154,31 @@ function SidebarUserMenu() {
                 </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() => signOut()}
-                className="text-destructive focus:text-destructive focus:bg-destructive/10"
-              >
-                <LogOut className="size-4" />
-                Sign out
-              </DropdownMenuItem>
+              {isGuest ? (
+                <>
+                  <DropdownMenuItem asChild>
+                    <Link to="/signup" onClick={() => { localStorage.removeItem("sculptor-guest"); setOpenMobile(false); }}>
+                      <User className="size-4" />
+                      Create Account
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => { localStorage.removeItem("sculptor-guest"); window.location.href = "/"; }}
+                    className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                  >
+                    <LogOut className="size-4" />
+                    Exit Guest Mode
+                  </DropdownMenuItem>
+                </>
+              ) : (
+                <DropdownMenuItem
+                  onClick={() => signOut()}
+                  className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                >
+                  <LogOut className="size-4" />
+                  Sign out
+                </DropdownMenuItem>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         </SidebarMenuItem>
