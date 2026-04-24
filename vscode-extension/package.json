@@ -1,0 +1,211 @@
+{
+  "name": "sculptor-ai",
+  "displayName": "Sculptor AI — Pareto-Optimal Database Design",
+  "description": "Agentic database design assistant: analyze object models, generate Pareto-optimal SQL/NoSQL schemas, and integrate directly into your codebase. Backed by formal verification.",
+  "version": "0.1.0",
+  "publisher": "sculptor-ai",
+  "license": "MIT",
+  "icon": "media/sculptor-ai-icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rashedhasan090/ReinforceORM"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Data Science",
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "database",
+    "orm",
+    "sql",
+    "nosql",
+    "pareto",
+    "reinforcement-learning",
+    "schema",
+    "optimization",
+    "agentic",
+    "formal-verification"
+  ],
+  "activationEvents": [
+    "onCommand:sculptor-ai.analyzeModel",
+    "onCommand:sculptor-ai.openDashboard",
+    "onCommand:sculptor-ai.insertSchema",
+    "onView:sculptorExplorer"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sculptor-ai.analyzeModel",
+        "title": "Sculptor AI: Analyze Object Model",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "sculptor-ai.openDashboard",
+        "title": "Sculptor AI: Open Dashboard",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "sculptor-ai.insertSchema",
+        "title": "Sculptor AI: Insert Schema at Cursor",
+        "icon": "$(insert)"
+      },
+      {
+        "command": "sculptor-ai.browsePareto",
+        "title": "Sculptor AI: Browse Pareto-Optimal Solutions",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "sculptor-ai.runSimulation",
+        "title": "Sculptor AI: Run Simulation",
+        "icon": "$(play)"
+      },
+      {
+        "command": "sculptor-ai.selectAlgorithm",
+        "title": "Sculptor AI: Select RL Algorithm",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "sculptor-ai.viewRoadmap",
+        "title": "Sculptor AI: View Performance Roadmap",
+        "icon": "$(rocket)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sculptor-ai",
+          "title": "Sculptor AI",
+          "icon": "media/sculptor-ai-sidebar.svg"
+        }
+      ]
+    },
+    "views": {
+      "sculptor-ai": [
+        {
+          "id": "sculptorExplorer",
+          "name": "Explorer",
+          "type": "webview"
+        },
+        {
+          "id": "sculptorSolutions",
+          "name": "Pareto Solutions"
+        },
+        {
+          "id": "sculptorSimulations",
+          "name": "Simulations"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "sculptor-ai.analyzeModel",
+          "group": "sculptor-ai@1",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "sculptor-ai.insertSchema",
+          "group": "sculptor-ai@2",
+          "when": "editorTextFocus"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "sculptor-ai.analyzeModel",
+          "group": "navigation",
+          "when": "resourceExtname == .als || resourceExtname == .alloy || resourceExtname == .json"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Sculptor AI",
+      "properties": {
+        "sculptor-ai.apiEndpoint": {
+          "type": "string",
+          "default": "https://clever-jay-27.convex.cloud",
+          "description": "Sculptor AI API endpoint"
+        },
+        "sculptor-ai.defaultAlgorithm": {
+          "type": "string",
+          "default": "actor_critic",
+          "enum": ["mc_control", "dqn", "actor_critic"],
+          "enumDescriptions": [
+            "Monte Carlo Control — Episode-based policy optimization",
+            "Deep Q-Network — Neural value estimation with soft-update",
+            "Actor-Critic — Policy gradient with entropy regularization"
+          ],
+          "description": "Default RL algorithm for analysis"
+        },
+        "sculptor-ai.episodes": {
+          "type": "number",
+          "default": 500,
+          "minimum": 50,
+          "maximum": 5000,
+          "description": "Number of RL training episodes"
+        },
+        "sculptor-ai.rewardWeights.strategy": {
+          "type": "number",
+          "default": 0.35,
+          "description": "Reward weight for strategy component"
+        },
+        "sculptor-ai.rewardWeights.performance": {
+          "type": "number",
+          "default": 0.35,
+          "description": "Reward weight for performance component"
+        },
+        "sculptor-ai.rewardWeights.constraints": {
+          "type": "number",
+          "default": 0.30,
+          "description": "Reward weight for constraints component"
+        },
+        "sculptor-ai.outputFormat": {
+          "type": "string",
+          "default": "both",
+          "enum": ["sql", "nosql", "both"],
+          "description": "Default schema output format"
+        },
+        "sculptor-ai.autoAnalyze": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically analyze .als/.alloy files when opened"
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "sculptor-ai.analyzeModel",
+        "key": "ctrl+shift+s",
+        "mac": "cmd+shift+s",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "sculptor-ai.browsePareto",
+        "key": "ctrl+shift+p",
+        "mac": "cmd+shift+p",
+        "when": "sculptorHasResults"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./tsconfig.json && node esbuild.js",
+    "watch": "tsc -watch -p ./tsconfig.json",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "esbuild": "^0.19.0",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "dependencies": {
+    "convex": "^1.17.0",
+    "convex-helpers": "^0.1.0"
+  }
+}
