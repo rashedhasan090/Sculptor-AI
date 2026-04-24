@@ -6,10 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useEffect } from "react";
+import { useGuestUser } from "@/hooks/useGuestUser";
 
 export function DashboardPage() {
-  const models = useQuery(api.objectModels.getUserModels);
-  const runs = useQuery(api.analysisRuns.getUserRuns);
+  const { guestUserId } = useGuestUser();
+  const guestArg = guestUserId ? { guestUserId } : {};
+  const models = useQuery(api.objectModels.getUserModels, guestArg);
+  const runs = useQuery(api.analysisRuns.getUserRuns, guestArg);
   const seedBenchmarks = useMutation(api.benchmarks.seed);
   const deleteModel = useMutation(api.objectModels.deleteModel);
 
@@ -127,7 +130,7 @@ export function DashboardPage() {
                           variant="ghost"
                           size="sm"
                           className="text-muted-foreground hover:text-destructive"
-                          onClick={() => deleteModel({ id: model._id })}
+                          onClick={() => deleteModel({ id: model._id, ...(guestUserId ? { guestUserId } : {}) })}
                         >
                           <Trash2 className="size-4" />
                         </Button>

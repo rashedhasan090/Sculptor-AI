@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query, internalQuery } from "./_generated/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { resolveUserId } from "./guestHelper";
 
 // ============== Object Model Parser ==============
 
@@ -191,7 +191,7 @@ function parseTextModel(input: string): { classes: ParsedClass[]; associations: 
 // ============== Queries ==============
 
 export const getUserModels = query({
-  args: {},
+  args: { guestUserId: v.optional(v.string()) },
   returns: v.array(v.object({
     _id: v.id("objectModels"),
     _creationTime: v.number(),
@@ -218,8 +218,8 @@ export const getUserModels = query({
     status: v.string(),
     createdAt: v.number(),
   })),
-  handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
+  handler: async (ctx, args) => {
+    const userId = await resolveUserId(ctx, args.guestUserId);
     if (!userId) return [];
     return await ctx.db.query("objectModels").withIndex("by_user", q => q.eq("userId", userId)).order("desc").collect();
   },
@@ -299,10 +299,11 @@ export const createModel = mutation({
     description: v.optional(v.string()),
     inputType: v.string(),
     rawInput: v.string(),
+    guestUserId: v.optional(v.string()),
   },
   returns: v.id("objectModels"),
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await resolveUserId(ctx, args.guestUserId);
     if (!userId) throw new Error("Not authenticated");
 
     let parsed: { classes: ParsedClass[]; associations: ParsedAssociation[] };
@@ -337,10 +338,10 @@ export const createModel = mutation({
 });
 
 export const deleteModel = mutation({
-  args: { id: v.id("objectModels") },
+  args: { id: v.id("objectModels"), guestUserId: v.optional(v.string()) },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await resolveUserId(ctx, args.guestUserId);
     if (!userId) throw new Error("Not authenticated");
     const model = await ctx.db.get(args.id);
     if (!model || model.userId !== userId) throw new Error("Not authorized");

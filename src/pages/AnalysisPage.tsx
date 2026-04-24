@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useParams, useNavigate } from "react-router-dom";
 import type { Id } from "../../convex/_generated/dataModel";
+import { useGuestUser } from "@/hooks/useGuestUser";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -19,6 +20,7 @@ export function AnalysisPage() {
   const model = useQuery(api.objectModels.getModel, modelId ? { id: modelId as Id<"objectModels"> } : "skip");
   const createRun = useMutation(api.analysisRuns.createRun);
   const navigate = useNavigate();
+  const { guestUserId } = useGuestUser();
 
   const [algorithms, setAlgorithms] = useState({
     monte_carlo: true,
@@ -76,6 +78,7 @@ export function AnalysisPage() {
       const runId = await createRun({
         objectModelId: modelId as Id<"objectModels">,
         algorithms: [...selectedAlgorithms, ...selectedLlms.map(l => `llm_${l}`)],
+        ...(guestUserId ? { guestUserId } : {}),
         config: {
           episodes,
           epsilon,

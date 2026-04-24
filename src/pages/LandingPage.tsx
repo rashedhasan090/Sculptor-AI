@@ -1,6 +1,10 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, Brain, FlaskConical, Shield, Zap, BarChart3, Layers, Code2, Target, Bot, RefreshCw, Plug, Workflow, Download, Monitor } from "lucide-react";
+import { ArrowRight, Brain, FlaskConical, Shield, Zap, BarChart3, Layers, Code2, Target, Bot, RefreshCw, Plug, Workflow, Download, Monitor, Mail, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useMutation } from "convex/react";
+import { api } from "../../convex/_generated/api";
+import { useState } from "react";
 
 export function LandingPage() {
   return (
@@ -349,6 +353,20 @@ export function LandingPage() {
         </div>
       </section>
 
+      {/* Newsletter */}
+      <section className="py-16 border-t border-border/40">
+        <div className="max-w-xl mx-auto px-6 text-center">
+          <div className="size-12 rounded-xl bg-emerald-500/10 flex items-center justify-center mx-auto mb-4">
+            <Mail className="size-6 text-emerald-500" />
+          </div>
+          <h2 className="text-2xl font-bold">Stay Updated</h2>
+          <p className="text-muted-foreground mt-2 text-sm">
+            Subscribe to get notified about new features, research updates, and releases.
+          </p>
+          <NewsletterForm />
+        </div>
+      </section>
+
       {/* Footer */}
       <footer className="border-t border-border/40 py-8">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
@@ -369,5 +387,59 @@ export function LandingPage() {
         </div>
       </footer>
     </div>
+  );
+}
+
+function NewsletterForm() {
+  const subscribe = useMutation(api.newsletter.subscribe);
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [message, setMessage] = useState("");
+
+  const handleSubscribe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setStatus("loading");
+    try {
+      const result = await subscribe({ email: email.trim() });
+      setStatus(result.success ? "success" : "error");
+      setMessage(result.message);
+      if (result.success) setEmail("");
+    } catch {
+      setStatus("error");
+      setMessage("Something went wrong. Please try again.");
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubscribe} className="mt-6 flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
+      {status === "success" ? (
+        <div className="flex items-center gap-2 text-emerald-400 text-sm mx-auto">
+          <CheckCircle className="size-4" />
+          <span>{message}</span>
+        </div>
+      ) : (
+        <>
+          <Input
+            type="email"
+            placeholder="Enter your email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="flex-1 bg-muted/50 border-border/60"
+            required
+          />
+          <Button
+            type="submit"
+            disabled={status === "loading"}
+            className="bg-emerald-600 hover:bg-emerald-700 shrink-0"
+          >
+            {status === "loading" ? "Subscribing..." : "Subscribe"}
+          </Button>
+        </>
+      )}
+      {status === "error" && (
+        <p className="text-xs text-red-400 mt-1">{message}</p>
+      )}
+    </form>
   );
 }

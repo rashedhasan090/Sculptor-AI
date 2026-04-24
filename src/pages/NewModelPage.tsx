@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useNavigate } from "react-router-dom";
+import { useGuestUser } from "@/hooks/useGuestUser";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -154,6 +155,7 @@ export function NewModelPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const createModel = useMutation(api.objectModels.createModel);
   const navigate = useNavigate();
+  const { guestUserId } = useGuestUser();
 
   const handleTabChange = (tab: string) => {
     setInputType(tab as "alloy" | "json" | "text");
@@ -179,6 +181,7 @@ export function NewModelPage() {
         description: description.trim() || undefined,
         inputType,
         rawInput: rawInput.trim(),
+        ...(guestUserId ? { guestUserId } : {}),
       });
       toast.success("Object model created successfully!");
       navigate(`/analysis/${modelId}`);

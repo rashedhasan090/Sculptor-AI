@@ -7,12 +7,14 @@ import { toast } from "sonner";
 import { Database, Loader2, Copy, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useEffect } from "react";
+import { useGuestUser } from "@/hooks/useGuestUser";
 
 export function BenchmarksPage() {
   const benchmarks = useQuery(api.benchmarks.list);
   const seedBenchmarks = useMutation(api.benchmarks.seed);
   const createModel = useMutation(api.objectModels.createModel);
   const navigate = useNavigate();
+  const { guestUserId } = useGuestUser();
 
   useEffect(() => {
     seedBenchmarks().catch(() => {});
@@ -25,6 +27,7 @@ export function BenchmarksPage() {
         description: `Pre-loaded benchmark from peer-reviewed research`,
         inputType: "alloy",
         rawInput: modelText,
+        ...(guestUserId ? { guestUserId } : {}),
       });
       toast.success(`${name} benchmark loaded!`);
       navigate(`/analysis/${modelId}`);

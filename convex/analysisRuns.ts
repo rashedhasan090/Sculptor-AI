@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { resolveUserId } from "./guestHelper";
 import { api } from "./_generated/api";
 
 export const createRun = mutation({
@@ -8,6 +8,7 @@ export const createRun = mutation({
     objectModelId: v.id("objectModels"),
     algorithms: v.array(v.string()),
     llmProvider: v.optional(v.string()),
+    guestUserId: v.optional(v.string()),
     config: v.object({
       episodes: v.number(),
       epsilon: v.number(),
@@ -20,7 +21,7 @@ export const createRun = mutation({
   },
   returns: v.id("analysisRuns"),
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await resolveUserId(ctx, args.guestUserId);
     if (!userId) throw new Error("Not authenticated");
 
     const runId = await ctx.db.insert("analysisRuns", {
@@ -47,7 +48,7 @@ export const createRun = mutation({
 });
 
 export const getUserRuns = query({
-  args: {},
+  args: { guestUserId: v.optional(v.string()) },
   returns: v.array(v.object({
     _id: v.id("analysisRuns"),
     _creationTime: v.number(),
@@ -71,8 +72,8 @@ export const getUserRuns = query({
     totalSolutionsExplored: v.optional(v.number()),
     paretoSolutionsFound: v.optional(v.number()),
   })),
-  handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
+  handler: async (ctx, args) => {
+    const userId = await resolveUserId(ctx, args.guestUserId);
     if (!userId) return [];
     return await ctx.db.query("analysisRuns").withIndex("by_user", q => q.eq("userId", userId)).order("desc").collect();
   },

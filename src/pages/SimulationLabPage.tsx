@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
+import { useGuestUser } from "@/hooks/useGuestUser";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -37,8 +38,10 @@ interface TimeSeriesPoint {
 }
 
 export function SimulationLabPage() {
-  const solutions = useQuery(api.solutions.getUserSolutions);
-  const simulations = useQuery(api.simulations.getUserSimulations);
+  const { guestUserId } = useGuestUser();
+  const guestArgs = guestUserId ? { guestUserId } : {};
+  const solutions = useQuery(api.solutions.getUserSolutions, guestArgs);
+  const simulations = useQuery(api.simulations.getUserSimulations, guestArgs);
   const createSim = useMutation(api.simulations.createSimulation);
 
   const [selectedSolution, setSelectedSolution] = useState<string>("");
@@ -270,6 +273,7 @@ export function SimulationLabPage() {
           solutionId: selectedSolution as Id<"solutions">,
           objectModelId: sol.objectModelId,
           config: { numRecords, queryComplexity, concurrentUsers },
+          ...(guestUserId ? { guestUserId } : {}),
         });
       } catch {}
     }

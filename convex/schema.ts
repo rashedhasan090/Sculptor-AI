@@ -108,6 +108,12 @@ const schema = defineSchema({
     createdAt: v.number(),
   }).index("by_user", ["userId"]).index("by_solution", ["solutionId"]),
 
+  // Newsletter subscribers
+  subscribers: defineTable({
+    email: v.string(),
+    subscribedAt: v.number(),
+  }).index("by_email", ["email"]),
+
   // Pre-loaded benchmark datasets
   benchmarks: defineTable({
     name: v.string(),

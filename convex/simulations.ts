@@ -1,11 +1,12 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { resolveUserId } from "./guestHelper";
 
 export const createSimulation = mutation({
   args: {
     solutionId: v.id("solutions"),
     objectModelId: v.id("objectModels"),
+    guestUserId: v.optional(v.string()),
     config: v.object({
       numRecords: v.number(),
       queryComplexity: v.string(),
@@ -14,7 +15,7 @@ export const createSimulation = mutation({
   },
   returns: v.id("simulations"),
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
+    const userId = await resolveUserId(ctx, args.guestUserId);
     if (!userId) throw new Error("Not authenticated");
 
     const solution = await ctx.db.get(args.solutionId);
@@ -58,7 +59,7 @@ export const createSimulation = mutation({
 });
 
 export const getUserSimulations = query({
-  args: {},
+  args: { guestUserId: v.optional(v.string()) },
   returns: v.array(v.object({
     _id: v.id("simulations"),
     _creationTime: v.number(),
@@ -80,8 +81,8 @@ export const getUserSimulations = query({
     status: v.string(),
     createdAt: v.number(),
   })),
-  handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
+  handler: async (ctx, args) => {
+    const userId = await resolveUserId(ctx, args.guestUserId);
     if (!userId) return [];
     return await ctx.db.query("simulations").withIndex("by_user", q => q.eq("userId", userId)).order("desc").collect();
   },

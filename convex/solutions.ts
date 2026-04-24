@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { resolveUserId } from "./guestHelper";
 
 const solutionValidator = v.object({
   _id: v.id("solutions"),
@@ -54,10 +54,10 @@ export const getSolution = query({
 });
 
 export const getUserSolutions = query({
-  args: {},
+  args: { guestUserId: v.optional(v.string()) },
   returns: v.array(solutionValidator),
-  handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
+  handler: async (ctx, args) => {
+    const userId = await resolveUserId(ctx, args.guestUserId);
     if (!userId) return [];
     return await ctx.db.query("solutions").withIndex("by_user", q => q.eq("userId", userId)).order("desc").take(100);
   },
