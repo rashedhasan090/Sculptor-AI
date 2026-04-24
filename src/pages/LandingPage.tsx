@@ -57,7 +57,7 @@ export function LandingPage() {
                   Start Building <ArrowRight className="ml-2 size-4" />
                 </Button>
               </Link>
-              <a href="https://github.com/rashedhasan090/Sculptor-AI/releases" target="_blank" rel="noopener noreferrer">
+              <a href="https://github.com/rashedhasan090/Sculptor-AI/raw/main/releases/sculptor-ai-0.1.0.vsix" target="_blank" rel="noopener noreferrer">
                 <Button variant="outline" size="lg" className="h-12 px-7 text-base border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10">
                   <Download className="mr-2 size-4" /> VS Code Extension
                 </Button>
@@ -294,7 +294,7 @@ export function LandingPage() {
                   <li className="flex items-center gap-2"><Brain className="size-3.5 text-emerald-500 shrink-0" /> Select algorithm: MC Control, DQN, Actor-Critic</li>
                 </ul>
                 <div className="flex items-center gap-3 mt-6">
-                  <a href="https://github.com/rashedhasan090/Sculptor-AI/releases" target="_blank" rel="noopener noreferrer">
+                  <a href="https://github.com/rashedhasan090/Sculptor-AI/raw/main/releases/sculptor-ai-0.1.0.vsix" target="_blank" rel="noopener noreferrer">
                     <Button size="lg" className="bg-emerald-600 hover:bg-emerald-700 h-11 px-6">
                       <Download className="mr-2 size-4" /> Download Extension
                     </Button>
