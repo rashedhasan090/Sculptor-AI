@@ -34,6 +34,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Eye,
+  Wand2,
+  Settings,
+  BrainCircuit,
 } from "lucide-react";
 
 /* ──────────────────────────── sample data ──────────────────────────── */
@@ -196,12 +199,171 @@ function detectFileFormat(name: string, content: string): "alloy" | "json" | "te
   if (lower.endsWith(".json") || JSON_EXTS.some(e => lower.endsWith(e))) return "json";
   if (lower.endsWith(".als") || lower.endsWith(".alloy")) return "alloy";
   if (TEXT_EXTS.some(e => lower.endsWith(e))) return "text";
-  // Try to auto-detect from content
   const trimmed = content.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) return "json";
   if (/^module\s/m.test(trimmed) || /one\s+sig\s+\w+\s+extends\s+(Class|Association)/m.test(trimmed)) return "alloy";
   if (/^class\s+\w+/m.test(trimmed) || /^association\s+\w+/m.test(trimmed)) return "text";
   return null;
+}
+
+/* ─────────────────── AI Vision parsing ─────────────────── */
+
+const VISION_SYSTEM_PROMPT = `You are a UML class diagram parser for a database design tool called DesignTradeoffSculptor (DTF).
+Your job is to extract ALL classes, attributes, types, inheritance, and associations from a UML class diagram image.
+
+Output ONLY in this exact structured text format (no markdown, no explanation):
+
+class ClassName
+- attributeName: Type
+- attributeName2: Type
+
+class ChildClass extends ParentClass
+- extraAttribute: Type
+
+abstract class AbstractClassName
+- attributeName: Type
+
+association AssociationName: SourceClass -> DestinationClass (SRC_MULT to DST_MULT)
+
+Rules:
+- Types must be one of: Integer, String, Real, Boolean, Date
+- Multiplicities must be: ONE, MANY, ZERO_OR_ONE, ZERO_OR_MANY, ONE_OR_MANY
+- Map "int" -> Integer, "string/varchar/text/char" -> String, "float/double/decimal/real" -> Real, "bool/boolean" -> Boolean, "date/datetime/timestamp" -> Date
+- Include ALL classes you can see, even if partially visible
+- For inheritance (generalization arrows with hollow triangles), use "extends"
+- For abstract classes (italic class names or marked abstract), use "abstract class"
+- Ignore methods/operations - only extract attributes
+- First attribute of each class is the primary key if not obvious, use className + "Id" as Integer
+- If multiplicity is shown (1, *, 0..1, 1..*, 0..*), map to: 1->ONE, *->MANY, 0..1->ZERO_OR_ONE, 0..*->ZERO_OR_MANY, 1..*->ONE_OR_MANY
+- Name associations as SourceDestinationAssociation if no name is shown`;
+
+async function analyzeImageWithOpenAI(base64Data: string, mimeType: string, apiKey: string): Promise<string> {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: VISION_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Extract all classes, attributes, types, inheritance, and associations from this UML class diagram. Output ONLY in the structured text format specified." },
+            {
+              type: "image_url",
+              image_url: { url: `data:${mimeType};base64,${base64Data}`, detail: "high" },
+            },
+          ],
+        },
+      ],
+      max_tokens: 4096,
+      temperature: 0.1,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `OpenAI API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
+async function analyzeImageWithGemini(base64Data: string, mimeType: string, apiKey: string): Promise<string> {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: VISION_SYSTEM_PROMPT }] },
+        contents: [
+          {
+            parts: [
+              { text: "Extract all classes, attributes, types, inheritance, and associations from this UML class diagram. Output ONLY in the structured text format specified." },
+              { inlineData: { mimeType, data: base64Data } },
+            ],
+          },
+        ],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `Gemini API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+}
+
+async function analyzeImageWithAnthropic(base64Data: string, mimeType: string, apiKey: string): Promise<string> {
+  const mediaType = mimeType === "image/jpg" ? "image/jpeg" : mimeType;
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 4096,
+      system: VISION_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: { type: "base64", media_type: mediaType, data: base64Data },
+            },
+            { type: "text", text: "Extract all classes, attributes, types, inheritance, and associations from this UML class diagram. Output ONLY in the structured text format specified." },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `Anthropic API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.content?.[0]?.text ?? "";
+}
+
+interface VisionProvider {
+  name: string;
+  key: string;
+  fn: (b64: string, mime: string, key: string) => Promise<string>;
+}
+
+function getAvailableVisionProviders(): VisionProvider[] {
+  const providers: VisionProvider[] = [];
+  const openaiKey = localStorage.getItem("sculptor-openai-key");
+  const geminiKey = localStorage.getItem("sculptor-gemini-key");
+  const anthropicKey = localStorage.getItem("sculptor-anthropic-key");
+
+  if (openaiKey) providers.push({ name: "OpenAI GPT-4o", key: openaiKey, fn: analyzeImageWithOpenAI });
+  if (anthropicKey) providers.push({ name: "Claude", key: anthropicKey, fn: analyzeImageWithAnthropic });
+  if (geminiKey) providers.push({ name: "Gemini", key: geminiKey, fn: analyzeImageWithGemini });
+
+  return providers;
+}
+
+function extractBase64FromDataUrl(dataUrl: string): { base64: string; mimeType: string } {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) throw new Error("Invalid data URL");
+  return { mimeType: match[1], base64: match[2] };
 }
 
 /* ────────────────────────── live preview ────────────────────────── */
@@ -240,10 +402,44 @@ function quickPreview(
         })),
       };
     }
-    // For alloy / text / natural: count keywords
+
+    // For text format — more precise parsing
+    if (inputType === "text") {
+      const classes: PreviewClass[] = [];
+      const assocs: PreviewAssoc[] = [];
+      let currentClass: PreviewClass | null = null;
+      for (const line of rawInput.split("\n")) {
+        const trimmed = line.trim();
+        const classMatch = trimmed.match(/^(?:abstract\s+)?class\s+(\w+)(?:\s+extends\s+(\w+))?/);
+        if (classMatch) {
+          if (currentClass) classes.push(currentClass);
+          currentClass = {
+            name: classMatch[1],
+            attrs: 0,
+            parent: classMatch[2],
+            isAbstract: trimmed.startsWith("abstract"),
+          };
+          continue;
+        }
+        if (trimmed.startsWith("- ") && currentClass) {
+          currentClass.attrs++;
+          continue;
+        }
+        const assocMatch = trimmed.match(/^association\s+\w+:\s*(\w+)\s*->\s*(\w+)\s*\((\w+)\s+to\s+(\w+)\)/);
+        if (assocMatch) {
+          if (currentClass) { classes.push(currentClass); currentClass = null; }
+          assocs.push({ src: assocMatch[1], dst: assocMatch[2], mult: `${assocMatch[3]}:${assocMatch[4]}` });
+        }
+      }
+      if (currentClass) classes.push(currentClass);
+      if (classes.length > 0) return { classes, assocs };
+    }
+
+    // For alloy / natural: count keywords
     const classMatches = rawInput.match(/(?:class\s+|one\s+sig\s+)(\w+)/gi) ?? [];
     const assocMatches = rawInput.match(/(?:association|Association|has\s+many|many-to-many|one-to-many|belongs?\s+to|contains?\s+many)/gi) ?? [];
     if (classMatches.length === 0 && inputType !== "natural") return null;
+
     // For natural language, try to count entity-like capitalized words
     if (inputType === "natural") {
       const caps = new Set<string>();
@@ -294,6 +490,11 @@ export function NewModelPage() {
   const [isFetchingUrl, setIsFetchingUrl] = useState(false);
   const [urlIsImage, setUrlIsImage] = useState(false);
 
+  // AI Vision state
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisProvider, setAnalysisProvider] = useState<string>("");
+  const [visionExtracted, setVisionExtracted] = useState(false);
+
   const createModel = useMutation(api.objectModels.createModel);
   const navigate = useNavigate();
   const { guestUserId } = useGuestUser();
@@ -301,6 +502,7 @@ export function NewModelPage() {
   /* ── tab switching ── */
   const handleTabChange = (tab: string) => {
     setInputTab(tab);
+    setVisionExtracted(false);
     if (tab === "describe") {
       setRawInput(SAMPLE_NATURAL);
       setEffectiveType("natural");
@@ -320,22 +522,164 @@ export function NewModelPage() {
     }
   };
 
+  /* ── AI Vision analysis ── */
+  const handleAnalyzeImage = async (imageDataUrl: string) => {
+    const providers = getAvailableVisionProviders();
+    if (providers.length === 0) {
+      toast.error("No AI API key found. Add an OpenAI, Anthropic, or Gemini key in Settings to analyze images.", { duration: 6000 });
+      return;
+    }
+
+    setIsAnalyzing(true);
+    let lastError = "";
+
+    for (const provider of providers) {
+      try {
+        setAnalysisProvider(provider.name);
+        const { base64, mimeType } = extractBase64FromDataUrl(imageDataUrl);
+        const result = await provider.fn(base64, mimeType, provider.key);
+
+        if (result.trim()) {
+          // Clean up the result — remove markdown fences if present
+          let cleaned = result.trim();
+          cleaned = cleaned.replace(/^```[\w]*\n?/gm, "").replace(/```$/gm, "").trim();
+
+          setRawInput(cleaned);
+          setEffectiveType("text");
+          setImageDescription(cleaned);
+          setVisionExtracted(true);
+          toast.success(`Class diagram analyzed with ${provider.name}!`, { duration: 4000 });
+          setIsAnalyzing(false);
+          setAnalysisProvider("");
+          return;
+        }
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        console.warn(`Vision analysis failed with ${provider.name}:`, lastError);
+        continue;
+      }
+    }
+
+    setIsAnalyzing(false);
+    setAnalysisProvider("");
+    toast.error(`AI analysis failed: ${lastError}. You can still describe the model manually.`, { duration: 6000 });
+  };
+
+  const handleAnalyzeUrlImage = async (imageUrl: string) => {
+    // For URL images, try to fetch and convert to data URL first
+    const providers = getAvailableVisionProviders();
+    if (providers.length === 0) {
+      toast.error("No AI API key found. Add an OpenAI, Anthropic, or Gemini key in Settings.", { duration: 6000 });
+      return;
+    }
+
+    setIsAnalyzing(true);
+    let lastError = "";
+
+    for (const provider of providers) {
+      try {
+        setAnalysisProvider(provider.name);
+
+        // For OpenAI, we can pass the URL directly
+        if (provider.name === "OpenAI GPT-4o") {
+          const response = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${provider.key}`,
+            },
+            body: JSON.stringify({
+              model: "gpt-4o",
+              messages: [
+                { role: "system", content: VISION_SYSTEM_PROMPT },
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: "Extract all classes, attributes, types, inheritance, and associations from this UML class diagram. Output ONLY in the structured text format specified." },
+                    { type: "image_url", image_url: { url: imageUrl, detail: "high" } },
+                  ],
+                },
+              ],
+              max_tokens: 4096,
+              temperature: 0.1,
+            }),
+          });
+
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err?.error?.message || `API error: ${response.status}`);
+          }
+
+          const data = await response.json();
+          const result = data.choices?.[0]?.message?.content ?? "";
+          if (result.trim()) {
+            let cleaned = result.trim().replace(/^```[\w]*\n?/gm, "").replace(/```$/gm, "").trim();
+            setRawInput(cleaned);
+            setEffectiveType("text");
+            setImageDescription(cleaned);
+            setVisionExtracted(true);
+            toast.success(`Class diagram analyzed with ${provider.name}!`);
+            setIsAnalyzing(false);
+            setAnalysisProvider("");
+            return;
+          }
+        }
+
+        // For other providers, try fetching the image as base64
+        try {
+          const resp = await fetch(imageUrl);
+          if (resp.ok) {
+            const blob = await resp.blob();
+            const reader = new FileReader();
+            const dataUrl = await new Promise<string>((resolve) => {
+              reader.onload = () => resolve(reader.result as string);
+              reader.readAsDataURL(blob);
+            });
+            const { base64, mimeType } = extractBase64FromDataUrl(dataUrl);
+            const result = await provider.fn(base64, mimeType, provider.key);
+            if (result.trim()) {
+              let cleaned = result.trim().replace(/^```[\w]*\n?/gm, "").replace(/```$/gm, "").trim();
+              setRawInput(cleaned);
+              setEffectiveType("text");
+              setImageDescription(cleaned);
+              setVisionExtracted(true);
+              toast.success(`Class diagram analyzed with ${provider.name}!`);
+              setIsAnalyzing(false);
+              setAnalysisProvider("");
+              return;
+            }
+          }
+        } catch {
+          throw new Error("Could not fetch image for analysis");
+        }
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        console.warn(`Vision analysis failed with ${provider.name}:`, lastError);
+        continue;
+      }
+    }
+
+    setIsAnalyzing(false);
+    setAnalysisProvider("");
+    toast.error(`AI analysis failed: ${lastError}`, { duration: 6000 });
+  };
+
   /* ── file upload handling ── */
   const processFile = useCallback(
     (file: File) => {
       const isImage = IMAGE_TYPES.includes(file.type) || /\.(png|jpe?g|svg|webp|gif)$/i.test(file.name);
 
       if (isImage) {
-        // Read as data URL for preview
         const reader = new FileReader();
         reader.onload = () => {
           setUploadedImage(reader.result as string);
           setUploadedFileName(file.name);
-          setEffectiveType("natural"); // User will describe it
+          setEffectiveType("natural");
+          setVisionExtracted(false);
+          setImageDescription("");
         };
         reader.readAsDataURL(file);
       } else {
-        // Read as text and detect format
         const reader = new FileReader();
         reader.onload = () => {
           const content = reader.result as string;
@@ -386,16 +730,16 @@ export function NewModelPage() {
     }
     setIsFetchingUrl(true);
     try {
-      // Check if it looks like an image URL
       const isImg = /\.(png|jpe?g|svg|webp|gif|bmp)(\?.*)?$/i.test(modelUrl);
       if (isImg) {
         setUrlPreview(modelUrl);
         setUrlIsImage(true);
         setUrlContent("");
         setEffectiveType("natural");
-        toast.success("Image URL detected — describe the model below");
+        setVisionExtracted(false);
+        setImageDescription("");
+        toast.success("Image URL detected — click Analyze to extract the class diagram");
       } else {
-        // Try to fetch text content
         const resp = await fetch(modelUrl);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const text = await resp.text();
@@ -428,21 +772,27 @@ export function NewModelPage() {
       return;
     }
 
-    // Determine actual input to send
     let submitInput = rawInput;
     let submitType = effectiveType;
 
-    if (inputTab === "upload" && uploadedImage) {
-      // Image upload → use the description as NL input
+    // If on upload/url tab with image and vision extracted the text format
+    if (inputTab === "upload" && uploadedImage && visionExtracted) {
+      submitInput = rawInput; // Already set by vision analysis
+      submitType = "text";
+    } else if (inputTab === "upload" && uploadedImage && !visionExtracted) {
+      // Manual description fallback
       if (!imageDescription.trim()) {
-        toast.error("Please describe the object model shown in the image");
+        toast.error("Please analyze the image with AI or describe the object model manually");
         return;
       }
       submitInput = imageDescription;
       submitType = "natural";
-    } else if (inputTab === "url" && urlIsImage) {
+    } else if (inputTab === "url" && urlIsImage && visionExtracted) {
+      submitInput = rawInput;
+      submitType = "text";
+    } else if (inputTab === "url" && urlIsImage && !visionExtracted) {
       if (!imageDescription.trim()) {
-        toast.error("Please describe the object model shown in the image");
+        toast.error("Please analyze the image with AI or describe the object model manually");
         return;
       }
       submitInput = imageDescription;
@@ -473,9 +823,12 @@ export function NewModelPage() {
   };
 
   /* ── live preview ── */
-  const previewInput = inputTab === "upload" && uploadedImage ? imageDescription :
-                       inputTab === "url" && urlIsImage ? imageDescription : rawInput;
-  const preview = quickPreview(effectiveType, previewInput);
+  const previewInput = (inputTab === "upload" && uploadedImage && !visionExtracted) ? imageDescription :
+                       (inputTab === "url" && urlIsImage && !visionExtracted) ? imageDescription : rawInput;
+  const previewType = visionExtracted ? "text" : effectiveType;
+  const preview = quickPreview(previewType, previewInput);
+
+  const hasAnyKey = getAvailableVisionProviders().length > 0;
 
   /* ──────────────────── render ──────────────────── */
   return (
@@ -638,6 +991,7 @@ export function NewModelPage() {
                             setUploadedImage(null);
                             setUploadedFileName("");
                             setImageDescription("");
+                            setVisionExtracted(false);
                           }}
                         >
                           <X className="size-4" />
@@ -650,18 +1004,81 @@ export function NewModelPage() {
                           className="max-h-[300px] object-contain"
                         />
                       </div>
-                      <div>
-                        <Label className="text-xs flex items-center gap-1.5 mb-1.5">
-                          <Eye className="size-3.5" />
-                          Describe the object model shown in the image *
-                        </Label>
-                        <Textarea
-                          value={imageDescription}
-                          onChange={e => setImageDescription(e.target.value)}
-                          className="min-h-[160px] text-sm leading-relaxed"
-                          placeholder={`Look at your diagram and describe the entities, attributes, and relationships.\n\nExample:\nCustomer has customerID (integer), name (string), email (string).\nOrder has orderID (integer), orderDate (string), total (real).\nA customer has many orders.\nAn order contains many products.`}
-                        />
-                      </div>
+
+                      {/* AI Analyze button */}
+                      {!visionExtracted && (
+                        <div className="space-y-2">
+                          <Button
+                            onClick={() => handleAnalyzeImage(uploadedImage)}
+                            disabled={isAnalyzing}
+                            className="w-full bg-gradient-to-r from-violet-600 to-emerald-600 hover:from-violet-700 hover:to-emerald-700 h-11"
+                          >
+                            {isAnalyzing ? (
+                              <>
+                                <Loader2 className="size-4 mr-2 animate-spin" />
+                                Analyzing with {analysisProvider}...
+                              </>
+                            ) : (
+                              <>
+                                <BrainCircuit className="size-4 mr-2" />
+                                Analyze Class Diagram with AI
+                                <Wand2 className="size-4 ml-2" />
+                              </>
+                            )}
+                          </Button>
+                          {!hasAnyKey && (
+                            <div className="flex items-start gap-2 text-xs text-amber-400/80 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5">
+                              <Settings className="size-3.5 mt-0.5 shrink-0" />
+                              <span>
+                                Add an OpenAI, Anthropic, or Gemini API key in{" "}
+                                <a href="/settings" className="underline font-medium">Settings</a>{" "}
+                                to enable AI image analysis. You can also describe the model manually below.
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Vision extracted result */}
+                      {visionExtracted && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-sm bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3">
+                            <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
+                            <span>
+                              <strong>AI extracted the class diagram!</strong> Review and edit the parsed model below.
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="ml-auto text-xs"
+                              onClick={() => { setVisionExtracted(false); setImageDescription(""); }}
+                            >
+                              Re-analyze
+                            </Button>
+                          </div>
+                          <Textarea
+                            value={rawInput}
+                            onChange={e => setRawInput(e.target.value)}
+                            className="font-mono text-xs min-h-[240px] leading-relaxed"
+                          />
+                        </div>
+                      )}
+
+                      {/* Manual description fallback */}
+                      {!visionExtracted && (
+                        <div>
+                          <Label className="text-xs flex items-center gap-1.5 mb-1.5 text-muted-foreground">
+                            <Eye className="size-3.5" />
+                            Or describe the model manually
+                          </Label>
+                          <Textarea
+                            value={imageDescription}
+                            onChange={e => setImageDescription(e.target.value)}
+                            className="min-h-[120px] text-sm leading-relaxed"
+                            placeholder={`Describe the classes, attributes, and relationships you see...\n\nExample: Customer has name (string), email (string). Order has orderID (integer), total (real). A customer has many orders.`}
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -724,18 +1141,79 @@ export function NewModelPage() {
                           }}
                         />
                       </div>
-                      <div>
-                        <Label className="text-xs flex items-center gap-1.5 mb-1.5">
-                          <Eye className="size-3.5" />
-                          Describe the object model shown in the image *
-                        </Label>
-                        <Textarea
-                          value={imageDescription}
-                          onChange={e => setImageDescription(e.target.value)}
-                          className="min-h-[160px] text-sm leading-relaxed"
-                          placeholder="Describe the entities, attributes, and relationships shown in the image..."
-                        />
-                      </div>
+
+                      {/* AI Analyze button */}
+                      {!visionExtracted && (
+                        <div className="space-y-2">
+                          <Button
+                            onClick={() => handleAnalyzeUrlImage(urlPreview)}
+                            disabled={isAnalyzing}
+                            className="w-full bg-gradient-to-r from-violet-600 to-emerald-600 hover:from-violet-700 hover:to-emerald-700 h-11"
+                          >
+                            {isAnalyzing ? (
+                              <>
+                                <Loader2 className="size-4 mr-2 animate-spin" />
+                                Analyzing with {analysisProvider}...
+                              </>
+                            ) : (
+                              <>
+                                <BrainCircuit className="size-4 mr-2" />
+                                Analyze Class Diagram with AI
+                                <Wand2 className="size-4 ml-2" />
+                              </>
+                            )}
+                          </Button>
+                          {!hasAnyKey && (
+                            <div className="flex items-start gap-2 text-xs text-amber-400/80 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5">
+                              <Settings className="size-3.5 mt-0.5 shrink-0" />
+                              <span>
+                                Add an API key in{" "}
+                                <a href="/settings" className="underline font-medium">Settings</a>{" "}
+                                to enable AI image analysis.
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Vision extracted */}
+                      {visionExtracted && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 text-sm bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3">
+                            <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
+                            <span><strong>AI extracted the class diagram!</strong> Review and edit below.</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="ml-auto text-xs"
+                              onClick={() => { setVisionExtracted(false); setImageDescription(""); }}
+                            >
+                              Re-analyze
+                            </Button>
+                          </div>
+                          <Textarea
+                            value={rawInput}
+                            onChange={e => setRawInput(e.target.value)}
+                            className="font-mono text-xs min-h-[240px] leading-relaxed"
+                          />
+                        </div>
+                      )}
+
+                      {/* Manual fallback */}
+                      {!visionExtracted && (
+                        <div>
+                          <Label className="text-xs flex items-center gap-1.5 mb-1.5 text-muted-foreground">
+                            <Eye className="size-3.5" />
+                            Or describe the model manually
+                          </Label>
+                          <Textarea
+                            value={imageDescription}
+                            onChange={e => setImageDescription(e.target.value)}
+                            className="min-h-[120px] text-sm leading-relaxed"
+                            placeholder="Describe the classes, attributes, and relationships you see..."
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -855,6 +1333,36 @@ export function NewModelPage() {
             </Card>
           )}
 
+          {/* AI Vision Info */}
+          <Card className="border-violet-500/20">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <BrainCircuit className="size-4 text-violet-400" />
+                AI Vision Parsing
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs text-muted-foreground space-y-2">
+              <p>
+                Upload a <strong>UML class diagram</strong> image and click <em>Analyze</em> to
+                automatically extract classes, attributes, types, inheritance, and associations.
+              </p>
+              <p>Supports GPT-4o, Claude, and Gemini vision models.</p>
+              {hasAnyKey ? (
+                <div className="flex items-center gap-1.5 text-emerald-400">
+                  <CheckCircle2 className="size-3.5" />
+                  <span>API key configured</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 text-amber-400">
+                  <AlertCircle className="size-3.5" />
+                  <span>
+                    No API key — <a href="/settings" className="underline">add one in Settings</a>
+                  </span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Format Guide */}
           <Card>
             <CardHeader className="pb-2">
@@ -874,7 +1382,7 @@ export function NewModelPage() {
                 <p className="font-medium text-foreground mb-1 flex items-center gap-1.5">
                   <Upload className="size-3" /> Image / File Upload
                 </p>
-                <p>Upload UML diagrams, class diagrams, or model files. For images, describe the model below the preview.</p>
+                <p>Upload UML class diagrams — AI extracts the model automatically. Also accepts JSON, TXT, and Alloy files.</p>
               </div>
               <div>
                 <p className="font-medium text-foreground mb-1 flex items-center gap-1.5">
