@@ -37,6 +37,46 @@ interface TimeSeriesPoint {
   p99Latency: number;
 }
 
+// Built-in demo solutions so the Simulation Lab works without running an analysis first
+const DEMO_SOLUTIONS = [
+  {
+    _id: "demo-tpc",
+    label: "TPC-Joined (Table-Per-Class + Join)",
+    algorithm: "MC Control",
+    isPareto: true,
+    isDemo: true,
+    metrics: { insertionTime: 2.8, queryTime: 6.4, storageSize: 95 },
+    description: "Balanced strategy — normalized joins with moderate storage",
+  },
+  {
+    _id: "demo-sti",
+    label: "STI-Optimized (Single-Table Inheritance)",
+    algorithm: "DQN",
+    isPareto: true,
+    isDemo: true,
+    metrics: { insertionTime: 1.2, queryTime: 3.1, storageSize: 210 },
+    description: "Fastest queries — denormalized single table, higher storage",
+  },
+  {
+    _id: "demo-cti",
+    label: "CTI-Hybrid (Class-Table Inheritance)",
+    algorithm: "Actor-Critic",
+    isPareto: true,
+    isDemo: true,
+    metrics: { insertionTime: 3.9, queryTime: 9.7, storageSize: 68 },
+    description: "Minimal storage — fully normalized, slower joins",
+  },
+  {
+    _id: "demo-mixed",
+    label: "Mixed Strategy (Pareto-Optimal)",
+    algorithm: "MC + DQN Ensemble",
+    isPareto: true,
+    isDemo: true,
+    metrics: { insertionTime: 2.1, queryTime: 4.8, storageSize: 135 },
+    description: "Best tradeoff — mixed inheritance, RL-optimized assignment",
+  },
+];
+
 export function SimulationLabPage() {
   const { guestUserId } = useGuestUser();
   const guestArgs = guestUserId ? { guestUserId } : {};
@@ -44,7 +84,7 @@ export function SimulationLabPage() {
   const simulations = useQuery(api.simulations.getUserSimulations, guestArgs);
   const createSim = useMutation(api.simulations.createSimulation);
 
-  const [selectedSolution, setSelectedSolution] = useState<string>("");
+  const [selectedSolution, setSelectedSolution] = useState<string>("demo-mixed");
   const [numRecords, setNumRecords] = useState(10000);
   const [queryComplexity, setQueryComplexity] = useState("moderate");
   const [concurrentUsers, setConcurrentUsers] = useState(50);
@@ -59,8 +99,11 @@ export function SimulationLabPage() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const paretoSolutions = solutions?.filter((s: any) => s.isPareto) ?? [];
-  const allSolutions = solutions ?? [];
+  const userSolutions = solutions ?? [];
+  const paretoSolutions = userSolutions.filter((s: any) => s.isPareto);
+
+  // Combine demo + user solutions
+  const allSolutions = [...DEMO_SOLUTIONS, ...userSolutions] as any[];
 
   // Simulation parameters derived from solution
   const selectedSol = allSolutions.find((s: any) => s._id === selectedSolution);
@@ -265,23 +308,28 @@ export function SimulationLabPage() {
     setLiveMetrics(null);
     setPrevMetrics(null);
 
-    // Also create a server-side record
-    const sol = allSolutions.find((s: any) => s._id === selectedSolution);
-    if (sol) {
-      try {
-        await createSim({
-          solutionId: selectedSolution as Id<"solutions">,
-          objectModelId: sol.objectModelId,
-          config: { numRecords, queryComplexity, concurrentUsers },
-          ...(guestUserId ? { guestUserId } : {}),
-        });
-      } catch {}
+    // Create server-side record only for real (non-demo) solutions
+    const isDemo = selectedSolution.startsWith("demo-");
+    if (!isDemo) {
+      const sol = allSolutions.find((s: any) => s._id === selectedSolution);
+      if (sol) {
+        try {
+          await createSim({
+            solutionId: selectedSolution as Id<"solutions">,
+            objectModelId: sol.objectModelId,
+            config: { numRecords, queryComplexity, concurrentUsers },
+            ...(guestUserId ? { guestUserId } : {}),
+          });
+        } catch {}
+      }
     }
+
+    toast.success(`Simulation started — ${isDemo ? "demo" : "custom"} solution`);
 
     intervalRef.current = setInterval(() => {
       simulateTick();
     }, 1000);
-  }, [selectedSolution, allSolutions, createSim, numRecords, queryComplexity, concurrentUsers, simulateTick]);
+  }, [selectedSolution, allSolutions, createSim, numRecords, queryComplexity, concurrentUsers, simulateTick, guestUserId]);
 
   const pauseSimulation = () => {
     setIsPaused(true);
@@ -343,26 +391,45 @@ export function SimulationLabPage() {
                     <SelectValue placeholder="Choose..." />
                   </SelectTrigger>
                   <SelectContent>
+                    {/* Demo solutions always available */}
+                    <div className="px-2 py-1 text-xs text-muted-foreground font-medium">⚡ Built-in Scenarios</div>
+                    {DEMO_SOLUTIONS.map(s => (
+                      <SelectItem key={s._id} value={s._id}>
+                        <span className="flex items-center gap-1.5 text-xs">
+                          <Star className="size-3 text-emerald-500" />
+                          {s.label}
+                        </span>
+                      </SelectItem>
+                    ))}
+                    {/* User solutions from analysis runs */}
                     {paretoSolutions.length > 0 && (
                       <>
-                        <div className="px-2 py-1 text-xs text-muted-foreground font-medium">★ Pareto Optimal</div>
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground font-medium border-t mt-1 pt-1.5">★ Your Pareto-Optimal</div>
                         {paretoSolutions.map((s: any) => (
                           <SelectItem key={s._id} value={s._id}>
                             <span className="flex items-center gap-1.5 text-xs">
-                              <Star className="size-3 text-emerald-500" />
+                              <Star className="size-3 text-amber-500" />
                               #{s.solutionIndex + 1} — {s.algorithm}
                             </span>
                           </SelectItem>
                         ))}
                       </>
                     )}
-                    {allSolutions.filter((s: any) => !s.isPareto).slice(0, 10).map((s: any) => (
-                      <SelectItem key={s._id} value={s._id}>
-                        <span className="text-xs">#{s.solutionIndex + 1} — {s.algorithm}</span>
-                      </SelectItem>
-                    ))}
+                    {userSolutions.filter((s: any) => !s.isPareto).length > 0 && (
+                      <>
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground font-medium border-t mt-1 pt-1.5">Your Solutions</div>
+                        {userSolutions.filter((s: any) => !s.isPareto).slice(0, 10).map((s: any) => (
+                          <SelectItem key={s._id} value={s._id}>
+                            <span className="text-xs">#{s.solutionIndex + 1} — {s.algorithm}</span>
+                          </SelectItem>
+                        ))}
+                      </>
+                    )}
                   </SelectContent>
                 </Select>
+                {selectedSol?.isDemo && (
+                  <p className="text-[10px] text-muted-foreground mt-1">{(selectedSol as any).description}</p>
+                )}
               </div>
 
               <div>
@@ -408,7 +475,6 @@ export function SimulationLabPage() {
                 {!isRunning ? (
                   <Button
                     onClick={startSimulation}
-                    disabled={!selectedSolution}
                     className="w-full bg-emerald-600 hover:bg-emerald-700 h-9 text-xs"
                   >
                     <Play className="size-3.5 mr-1.5" /> Start Simulation
