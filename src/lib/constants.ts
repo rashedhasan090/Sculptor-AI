@@ -1,5 +1,1 @@
-<<<<<<< Updated upstream
-ZXhwb3J0IGNvbnN0IEFQUF9OQU1FID0gIkRlc2lnblRyYWRlb2ZmU2N1bHB0b3IiOwo=
-=======
 export const APP_NAME = "DesignTradeoffSculptor";
->>>>>>> Stashed changes
