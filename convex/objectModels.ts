@@ -188,6 +188,228 @@ function parseTextModel(input: string): { classes: ParsedClass[]; associations: 
   return { classes, associations };
 }
 
+// ============== Natural Language Parser ==============
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function singularize(s: string): string {
+  if (s.endsWith("ies")) return s.slice(0, -3) + "y";
+  if (s.endsWith("ses") || s.endsWith("xes") || s.endsWith("zes") || s.endsWith("ches") || s.endsWith("shes")) return s.slice(0, -2);
+  if (s.endsWith("s") && !s.endsWith("ss") && !s.endsWith("us")) return s.slice(0, -1);
+  return s;
+}
+
+function inferTypeFromName(name: string, typeHint?: string): string {
+  if (typeHint) {
+    const t = typeHint.toLowerCase().trim();
+    if (/^(int|integer|bigint|smallint|number)$/i.test(t)) return "Integer";
+    if (/^(str|string|text|varchar|char)$/i.test(t)) return "string";
+    if (/^(real|float|double|decimal|numeric|money)$/i.test(t)) return "Real";
+    if (/^(bool|boolean)$/i.test(t)) return "Bool";
+  }
+  const n = name.toLowerCase();
+  if (/id$|_id$|count|number|quantity|age|year|num$|index|size|port/.test(n)) return "Integer";
+  if (/name|email|address|title|description|type|status|date|url|phone|text|label|code|path/.test(n)) return "string";
+  if (/price|cost|total|amount|weight|salary|balance|rate|score|percent|lat|lon|height|width/.test(n)) return "Real";
+  if (/^is_|^has_|^can_|active|enabled|visible|deleted|flag|published/.test(n)) return "Bool";
+  return "Integer";
+}
+
+function parseNaturalLanguage(input: string): { classes: ParsedClass[]; associations: ParsedAssociation[] } {
+  const classMap = new Map<string, ParsedClass>();
+  const associations: ParsedAssociation[] = [];
+
+  const getOrCreate = (rawName: string): ParsedClass => {
+    const name = capitalize(singularize(rawName.trim()));
+    const key = name.toLowerCase();
+    if (classMap.has(key)) return classMap.get(key)!;
+    const cls: ParsedClass = { name, attributes: [], isAbstract: false, primaryKey: "" };
+    classMap.set(key, cls);
+    return cls;
+  };
+
+  const addAssoc = (srcName: string, dstName: string, srcMult: string, dstMult: string) => {
+    const src = getOrCreate(srcName);
+    const dst = getOrCreate(dstName);
+    // Prevent duplicate associations
+    const exists = associations.some(
+      a => a.source === src.name && a.destination === dst.name
+    );
+    if (!exists) {
+      associations.push({
+        name: `${src.name}${dst.name}Association`,
+        source: src.name,
+        destination: dst.name,
+        srcMultiplicity: srcMult,
+        dstMultiplicity: dstMult,
+      });
+    }
+  };
+
+  // Split into sentences on periods, newlines, semicolons
+  const sentences = input
+    .replace(/\r\n/g, "\n")
+    .split(/[.\n;]+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 2);
+
+  for (const sentence of sentences) {
+    const s = sentence;
+
+    // ---- INHERITANCE: "X extends/inherits from Y" ----
+    const inheritMatch = s.match(/(\w+)\s+(?:extends|inherits?\s+from|is\s+a\s+(?:type|subclass|kind|child)\s+of)\s+(\w+)/i);
+    if (inheritMatch) {
+      const child = getOrCreate(inheritMatch[1]);
+      const parent = getOrCreate(inheritMatch[2]);
+      child.parent = parent.name;
+      // Parse trailing "with X, Y attributes"
+      const withAttrs = s.match(/with\s+(.+?)(?:\s+attributes?)?$/i);
+      if (withAttrs) {
+        const parts = withAttrs[1].split(/,\s*(?:and\s+)?|\s+and\s+/);
+        for (const p of parts) {
+          const m = p.trim().match(/(?:an?\s+)?(\w+)\s*(?:\((\w+)\))?/);
+          if (m && m[1] && m[1].length > 1) {
+            child.attributes.push({ name: m[1], type: inferTypeFromName(m[1], m[2]) });
+          }
+        }
+      }
+      continue;
+    }
+
+    // ---- ABSTRACT: "abstract class X" ----
+    const abstractMatch = s.match(/abstract\s+(?:class|entity|table)\s+(\w+)/i) ||
+                          s.match(/(\w+)\s+is\s+(?:an?\s+)?abstract\s+(?:class|entity)?/i);
+    if (abstractMatch) {
+      const cls = getOrCreate(abstractMatch[1]);
+      cls.isAbstract = true;
+      continue;
+    }
+
+    // ---- MANY-TO-MANY: "many-to-many between X and Y" ----
+    const m2m = s.match(/many[- ]to[- ]many\s+(?:between\s+|relationship\s+|link\s+)?(\w+)\s+and\s+(\w+)/i) ||
+                s.match(/(\w+)\s+and\s+(\w+)\s+(?:have\s+)?(?:a\s+)?many[- ]to[- ]many/i);
+    if (m2m) { addAssoc(m2m[1], m2m[2], "MANY", "MANY"); continue; }
+
+    // ---- ONE-TO-MANY explicit: "one-to-many between X and Y" ----
+    const o2m = s.match(/one[- ]to[- ]many\s+(?:between\s+|relationship\s+)?(\w+)\s+and\s+(\w+)/i) ||
+                s.match(/(\w+)\s+and\s+(\w+)\s+(?:have\s+)?(?:a\s+)?one[- ]to[- ]many/i);
+    if (o2m) { addAssoc(o2m[1], o2m[2], "ONE", "MANY"); continue; }
+
+    // ---- ONE-TO-ONE: "one-to-one between X and Y" ----
+    const o2o = s.match(/one[- ]to[- ]one\s+(?:between\s+|relationship\s+)?(\w+)\s+and\s+(\w+)/i) ||
+                s.match(/(\w+)\s+and\s+(\w+)\s+(?:have\s+)?(?:a\s+)?one[- ]to[- ]one/i);
+    if (o2o) { addAssoc(o2o[1], o2o[2], "ONE", "ONE"); continue; }
+
+    // ---- BELONGS TO: "X belongs to Y" ----
+    const belongs = s.match(/(\w+)\s+belongs?\s+to\s+(?:a\s+|an\s+)?(\w+)/i);
+    if (belongs) { addAssoc(belongs[2], belongs[1], "ONE", "MANY"); continue; }
+
+    // ---- RELATIONSHIP: "X has/can have many Y" ----
+    const relMany = s.match(/(?:each|every|a|an)?\s*(\w+)\s+(?:can\s+)?(?:has|have|places?|contains?|includes?|owns?|manages?|creates?|holds?|stores?)\s+(?:many|multiple|several|one\s+or\s+more|zero\s+or\s+more)\s+(\w+)/i);
+    if (relMany) { addAssoc(relMany[1], relMany[2], "ONE", "MANY"); continue; }
+
+    // ---- RELATIONSHIP: "X has one Y" or "X has a Y" ----
+    const relOne = s.match(/(?:each|every|a|an)?\s*(\w+)\s+(?:has|have)\s+(?:exactly\s+)?(?:one|a|an|single)\s+(\w+)/i);
+    if (relOne) {
+      // Make sure the second word isn't an attribute pattern
+      const secondWord = relOne[2].toLowerCase();
+      if (!["id", "name", "email", "address", "type", "date", "status"].some(a => secondWord.includes(a))) {
+        addAssoc(relOne[1], relOne[2], "ONE", "ONE");
+        continue;
+      }
+    }
+
+    // ---- ATTRIBUTES with explicit format: "X has attributes: a (type), b (type)" ----
+    const attrExplicit = s.match(/(\w+)\s+(?:has|have|contains?|includes?)\s+(?:the\s+)?(?:following\s+)?(?:attributes?|properties|fields?|columns?)\s*:?\s+(.+)/i);
+    if (attrExplicit) {
+      const cls = getOrCreate(attrExplicit[1]);
+      const attrStr = attrExplicit[2];
+      const parts = attrStr.split(/,\s*(?:and\s+)?|\s+and\s+/);
+      for (const p of parts) {
+        const m = p.trim().match(/(?:an?\s+)?(\w+)\s*(?:\((\w+)\)|:\s*(\w+)|\[(\w+)\])/);
+        if (m) {
+          cls.attributes.push({ name: m[1], type: inferTypeFromName(m[1], m[2] || m[3] || m[4]) });
+        } else {
+          const simple = p.trim().match(/^(?:an?\s+)?(\w+)$/);
+          if (simple && simple[1].length > 1) {
+            cls.attributes.push({ name: simple[1], type: inferTypeFromName(simple[1]) });
+          }
+        }
+      }
+      continue;
+    }
+
+    // ---- ATTRIBUTES inline: "X has/have a, b (type), and c" (not followed by relationship words) ----
+    const attrInline = s.match(/(\w+)\s+(?:has|have)\s+(?:an?\s+)?(?!many|multiple|several|one\s+or)(.+)/i);
+    if (attrInline) {
+      const entityName = attrInline[1];
+      const rest = attrInline[2].trim();
+      // Check if it looks like attribute list (contains parenthesized types or commas)
+      if (/\(|,|:\s*\w/.test(rest)) {
+        const cls = getOrCreate(entityName);
+        const parts = rest.split(/,\s*(?:and\s+)?|\s+and\s+/);
+        for (const p of parts) {
+          const m = p.trim().match(/(?:an?\s+)?(\w+)\s*(?:\((\w+)\)|:\s*(\w+)|\[(\w+)\])/);
+          if (m) {
+            cls.attributes.push({ name: m[1], type: inferTypeFromName(m[1], m[2] || m[3] || m[4]) });
+          } else {
+            const simple = p.trim().match(/^(?:an?\s+)?(\w+)$/);
+            if (simple && simple[1].length > 1 && !["a", "an", "the"].includes(simple[1].toLowerCase())) {
+              cls.attributes.push({ name: simple[1], type: inferTypeFromName(simple[1]) });
+            }
+          }
+        }
+        continue;
+      }
+    }
+
+    // ---- ATTRIBUTE LINES: "- attributeName: type" or "- attributeName (type)" ----
+    const attrLine = s.match(/^[-*•]\s*(\w+)\s*(?:\((\w+)\)|:\s*(\w+))/);
+    if (attrLine) {
+      // Find the most recently created class
+      const classes = Array.from(classMap.values());
+      if (classes.length > 0) {
+        const lastClass = classes[classes.length - 1];
+        lastClass.attributes.push({
+          name: attrLine[1],
+          type: inferTypeFromName(attrLine[1], attrLine[2] || attrLine[3]),
+        });
+      }
+      continue;
+    }
+
+    // ---- ENTITY LIST: "system with X, Y, and Z entities" ----
+    const entityList = s.match(/(?:with|include[s]?|ha(?:s|ve)|:)\s+((?:\w+(?:\s*,\s*)?)+\s+and\s+\w+)\s+(?:entities|classes|tables|models|objects|types)/i);
+    if (entityList) {
+      const names = entityList[1].split(/,\s*|\s+and\s+/).map(n => n.trim()).filter(Boolean);
+      for (const name of names) {
+        if (name.length > 1) getOrCreate(name);
+      }
+      continue;
+    }
+  }
+
+  // Auto-assign primary keys
+  for (const cls of classMap.values()) {
+    if (!cls.primaryKey) {
+      const idAttr = cls.attributes.find(a => a.name.toLowerCase().endsWith("id"));
+      if (idAttr) {
+        cls.primaryKey = idAttr.name;
+      } else if (cls.attributes.length > 0) {
+        cls.primaryKey = cls.attributes[0].name;
+      } else {
+        const autoId = cls.name.charAt(0).toLowerCase() + cls.name.slice(1) + "ID";
+        cls.attributes.unshift({ name: autoId, type: "Integer" });
+        cls.primaryKey = autoId;
+      }
+    }
+  }
+
+  return { classes: Array.from(classMap.values()), associations };
+}
+
 // ============== Queries ==============
 
 export const getUserModels = query({
@@ -313,10 +535,12 @@ export const createModel = mutation({
         parsed = parseAlloyModel(args.rawInput);
       } else if (args.inputType === "json") {
         parsed = parseJSONModel(args.rawInput);
+      } else if (args.inputType === "natural") {
+        parsed = parseNaturalLanguage(args.rawInput);
       } else {
         parsed = parseTextModel(args.rawInput);
       }
-    } catch (e) {
+    } catch {
       parsed = { classes: [], associations: [] };
     }
 
