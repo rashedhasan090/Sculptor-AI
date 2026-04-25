@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { useMutation } from "convex/react";
+import { useAction, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useNavigate } from "react-router-dom";
 import { useGuestUser } from "@/hooks/useGuestUser";
@@ -206,186 +206,23 @@ function detectFileFormat(name: string, content: string): "alloy" | "json" | "te
   return null;
 }
 
-/* ─────────────────── AI Vision parsing ─────────────────── */
+/* ─────────────────── AI Vision parsing (server-side via Convex) ─────────────────── */
 
-const VISION_SYSTEM_PROMPT = `You are a UML class diagram parser for a database design tool called DesignTradeoffSculptor (DTF).
-Your job is to extract ALL classes, attributes, types, inheritance, and associations from a UML class diagram image.
-
-Output ONLY in this exact structured text format (no markdown, no explanation):
-
-class ClassName
-- attributeName: Type
-- attributeName2: Type
-
-class ChildClass extends ParentClass
-- extraAttribute: Type
-
-abstract class AbstractClassName
-- attributeName: Type
-
-association AssociationName: SourceClass -> DestinationClass (SRC_MULT to DST_MULT)
-
-Rules:
-- Types must be one of: Integer, String, Real, Boolean, Date
-- Multiplicities must be: ONE, MANY, ZERO_OR_ONE, ZERO_OR_MANY, ONE_OR_MANY
-- Map "int" -> Integer, "string/varchar/text/char" -> String, "float/double/decimal/real" -> Real, "bool/boolean" -> Boolean, "date/datetime/timestamp" -> Date
-- Include ALL classes you can see, even if partially visible
-- For inheritance (generalization arrows with hollow triangles), use "extends"
-- For abstract classes (italic class names or marked abstract), use "abstract class"
-- Ignore methods/operations - only extract attributes
-- First attribute of each class is the primary key if not obvious, use className + "Id" as Integer
-- If multiplicity is shown (1, *, 0..1, 1..*, 0..*), map to: 1->ONE, *->MANY, 0..1->ZERO_OR_ONE, 0..*->ZERO_OR_MANY, 1..*->ONE_OR_MANY
-- Name associations as SourceDestinationAssociation if no name is shown`;
-
-async function analyzeImageWithOpenAI(base64Data: string, mimeType: string, apiKey: string): Promise<string> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: VISION_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "Extract all classes, attributes, types, inheritance, and associations from this UML class diagram. Output ONLY in the structured text format specified." },
-            {
-              type: "image_url",
-              image_url: { url: `data:${mimeType};base64,${base64Data}`, detail: "high" },
-            },
-          ],
-        },
-      ],
-      max_tokens: 4096,
-      temperature: 0.1,
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `OpenAI API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content ?? "";
-}
-
-async function analyzeImageWithGemini(base64Data: string, mimeType: string, apiKey: string): Promise<string> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: VISION_SYSTEM_PROMPT }] },
-        contents: [
-          {
-            parts: [
-              { text: "Extract all classes, attributes, types, inheritance, and associations from this UML class diagram. Output ONLY in the structured text format specified." },
-              { inlineData: { mimeType, data: base64Data } },
-            ],
-          },
-        ],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
-      }),
-    }
-  );
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `Gemini API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-}
-
-async function analyzeImageWithAnthropic(base64Data: string, mimeType: string, apiKey: string): Promise<string> {
-  const mediaType = mimeType === "image/jpg" ? "image/jpeg" : mimeType;
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 4096,
-      system: VISION_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: { type: "base64", media_type: mediaType, data: base64Data },
-            },
-            { type: "text", text: "Extract all classes, attributes, types, inheritance, and associations from this UML class diagram. Output ONLY in the structured text format specified." },
-          ],
-        },
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `Anthropic API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-  return data.content?.[0]?.text ?? "";
-}
-
-interface VisionProvider {
-  name: string;
-  key: string;
-  fn: (b64: string, mime: string, key: string) => Promise<string>;
-}
-
-function getAvailableVisionProviders(): VisionProvider[] {
-  const providers: VisionProvider[] = [];
-  const openaiKey = localStorage.getItem("sculptor-openai-key");
-  const geminiKey = localStorage.getItem("sculptor-gemini-key");
-  const anthropicKey = localStorage.getItem("sculptor-anthropic-key");
-
-  if (openaiKey) providers.push({ name: "OpenAI GPT-4o", key: openaiKey, fn: analyzeImageWithOpenAI });
-  if (anthropicKey) providers.push({ name: "Claude", key: anthropicKey, fn: analyzeImageWithAnthropic });
-  if (geminiKey) providers.push({ name: "Gemini", key: geminiKey, fn: analyzeImageWithGemini });
-
-  return providers;
-}
-
-function cleanApiError(raw: string, providerName: string): string {
-  // Extract the useful part of verbose API errors
-  if (/quota/i.test(raw) || /rate.limit/i.test(raw) || /exceeded/i.test(raw)) {
-    return `${providerName} quota/rate limit exceeded`;
-  }
-  if (/invalid.*key/i.test(raw) || /auth/i.test(raw) || /401/i.test(raw)) {
-    return `${providerName} API key is invalid`;
-  }
-  if (/billing/i.test(raw) || /payment/i.test(raw)) {
-    return `${providerName} billing issue — check your plan`;
-  }
-  // Truncate long errors
-  const short = raw.length > 80 ? raw.slice(0, 80) + "…" : raw;
-  return `${providerName}: ${short}`;
-}
-
-function suggestAlternateProviders(providers: VisionProvider[]): string {
-  const configured = new Set(providers.map(p => p.name));
-  const missing: string[] = [];
-  if (!configured.has("OpenAI GPT-4o")) missing.push("OpenAI");
-  if (!configured.has("Claude")) missing.push("Anthropic");
-  if (!configured.has("Gemini")) missing.push("Gemini");
-  if (missing.length > 0) {
-    return ` Add a ${missing.join(" or ")} key in Settings as backup.`;
-  }
-  return " All configured providers failed — check your API keys.";
+function getConfiguredKeys(): {
+  openaiKey: string | null;
+  anthropicKey: string | null;
+  geminiKey: string | null;
+  hasAny: boolean;
+  providers: string[];
+} {
+  const openaiKey = localStorage.getItem("sculptor-openai-key") || null;
+  const anthropicKey = localStorage.getItem("sculptor-anthropic-key") || null;
+  const geminiKey = localStorage.getItem("sculptor-gemini-key") || null;
+  const providers: string[] = [];
+  if (openaiKey) providers.push("OpenAI");
+  if (anthropicKey) providers.push("Claude");
+  if (geminiKey) providers.push("Gemini");
+  return { openaiKey, anthropicKey, geminiKey, hasAny: providers.length > 0, providers };
 }
 
 function extractBase64FromDataUrl(dataUrl: string): { base64: string; mimeType: string } {
@@ -525,6 +362,8 @@ export function NewModelPage() {
   const [analysisError, setAnalysisError] = useState<string>("");
 
   const createModel = useMutation(api.objectModels.createModel);
+  const analyzeVision = useAction(api.visionAnalysis.analyzeImage);
+  const analyzeVisionUrl = useAction(api.visionAnalysis.analyzeImageUrl);
   const navigate = useNavigate();
   const { guestUserId } = useGuestUser();
 
@@ -551,155 +390,89 @@ export function NewModelPage() {
     }
   };
 
-  /* ── AI Vision analysis ── */
+  /* ── AI Vision analysis (server-side via Convex actions) ── */
   const handleAnalyzeImage = async (imageDataUrl: string) => {
-    const providers = getAvailableVisionProviders();
-    if (providers.length === 0) {
+    const keys = getConfiguredKeys();
+    if (!keys.hasAny) {
       toast.error("No AI API key found. Add an OpenAI, Anthropic, or Gemini key in Settings to analyze images.", { duration: 6000 });
       return;
     }
 
     setIsAnalyzing(true);
     setAnalysisError("");
-    const failedProviders: string[] = [];
+    setAnalysisProvider(keys.providers.join(" → "));
 
-    for (const provider of providers) {
-      try {
-        setAnalysisProvider(provider.name);
-        const { base64, mimeType } = extractBase64FromDataUrl(imageDataUrl);
-        const result = await provider.fn(base64, mimeType, provider.key);
+    try {
+      const { base64, mimeType } = extractBase64FromDataUrl(imageDataUrl);
+      const result = await analyzeVision({
+        base64Data: base64,
+        mimeType,
+        openaiKey: keys.openaiKey ?? undefined,
+        anthropicKey: keys.anthropicKey ?? undefined,
+        geminiKey: keys.geminiKey ?? undefined,
+      });
 
-        if (result.trim()) {
-          let cleaned = result.trim();
-          cleaned = cleaned.replace(/^```[\w]*\n?/gm, "").replace(/```$/gm, "").trim();
-
-          setRawInput(cleaned);
-          setEffectiveType("text");
-          setImageDescription(cleaned);
-          setVisionExtracted(true);
-          setAnalysisError("");
-          toast.success(`Class diagram analyzed with ${provider.name}!`, { duration: 4000 });
-          setIsAnalyzing(false);
-          setAnalysisProvider("");
-          return;
-        }
-      } catch (err) {
-        const rawMsg = err instanceof Error ? err.message : String(err);
-        failedProviders.push(cleanApiError(rawMsg, provider.name));
-        console.warn(`Vision analysis failed with ${provider.name}:`, rawMsg);
-        continue;
+      if (result.success && result.result) {
+        setRawInput(result.result);
+        setEffectiveType("text");
+        setImageDescription(result.result);
+        setVisionExtracted(true);
+        setAnalysisError("");
+        toast.success(`Class diagram analyzed with ${result.provider}!`, { duration: 4000 });
+      } else {
+        const errMsg = result.errors.join(" · ");
+        setAnalysisError(errMsg);
+        toast.error("AI analysis failed — see details below.", { duration: 5000 });
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setAnalysisError(msg);
+      toast.error("AI analysis failed — see details below.", { duration: 5000 });
+    } finally {
+      setIsAnalyzing(false);
+      setAnalysisProvider("");
     }
-
-    setIsAnalyzing(false);
-    setAnalysisProvider("");
-    const errSummary = failedProviders.join(". ") + "." + suggestAlternateProviders(providers);
-    setAnalysisError(errSummary);
-    toast.error("AI analysis failed — see details below. You can still describe the model manually.", { duration: 5000 });
   };
 
   const handleAnalyzeUrlImage = async (imageUrl: string) => {
-    const providers = getAvailableVisionProviders();
-    if (providers.length === 0) {
+    const keys = getConfiguredKeys();
+    if (!keys.hasAny) {
       toast.error("No AI API key found. Add an OpenAI, Anthropic, or Gemini key in Settings.", { duration: 6000 });
       return;
     }
 
     setIsAnalyzing(true);
     setAnalysisError("");
-    const failedProviders: string[] = [];
+    setAnalysisProvider(keys.providers.join(" → "));
 
-    for (const provider of providers) {
-      try {
-        setAnalysisProvider(provider.name);
+    try {
+      const result = await analyzeVisionUrl({
+        imageUrl,
+        openaiKey: keys.openaiKey ?? undefined,
+        anthropicKey: keys.anthropicKey ?? undefined,
+        geminiKey: keys.geminiKey ?? undefined,
+      });
 
-        // For OpenAI, we can pass the URL directly
-        if (provider.name === "OpenAI GPT-4o") {
-          const response = await fetch("https://api.openai.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${provider.key}`,
-            },
-            body: JSON.stringify({
-              model: "gpt-4o",
-              messages: [
-                { role: "system", content: VISION_SYSTEM_PROMPT },
-                {
-                  role: "user",
-                  content: [
-                    { type: "text", text: "Extract all classes, attributes, types, inheritance, and associations from this UML class diagram. Output ONLY in the structured text format specified." },
-                    { type: "image_url", image_url: { url: imageUrl, detail: "high" } },
-                  ],
-                },
-              ],
-              max_tokens: 4096,
-              temperature: 0.1,
-            }),
-          });
-
-          if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err?.error?.message || `API error: ${response.status}`);
-          }
-
-          const data = await response.json();
-          const result = data.choices?.[0]?.message?.content ?? "";
-          if (result.trim()) {
-            let cleaned = result.trim().replace(/^```[\w]*\n?/gm, "").replace(/```$/gm, "").trim();
-            setRawInput(cleaned);
-            setEffectiveType("text");
-            setImageDescription(cleaned);
-            setVisionExtracted(true);
-            setAnalysisError("");
-            toast.success(`Class diagram analyzed with ${provider.name}!`);
-            setIsAnalyzing(false);
-            setAnalysisProvider("");
-            return;
-          }
-        }
-
-        // For other providers, try fetching the image as base64
-        try {
-          const resp = await fetch(imageUrl);
-          if (resp.ok) {
-            const blob = await resp.blob();
-            const reader = new FileReader();
-            const dataUrl = await new Promise<string>((resolve) => {
-              reader.onload = () => resolve(reader.result as string);
-              reader.readAsDataURL(blob);
-            });
-            const { base64, mimeType } = extractBase64FromDataUrl(dataUrl);
-            const result = await provider.fn(base64, mimeType, provider.key);
-            if (result.trim()) {
-              let cleaned = result.trim().replace(/^```[\w]*\n?/gm, "").replace(/```$/gm, "").trim();
-              setRawInput(cleaned);
-              setEffectiveType("text");
-              setImageDescription(cleaned);
-              setVisionExtracted(true);
-              setAnalysisError("");
-              toast.success(`Class diagram analyzed with ${provider.name}!`);
-              setIsAnalyzing(false);
-              setAnalysisProvider("");
-              return;
-            }
-          }
-        } catch {
-          throw new Error("Could not fetch image for analysis");
-        }
-      } catch (err) {
-        const rawMsg = err instanceof Error ? err.message : String(err);
-        failedProviders.push(cleanApiError(rawMsg, provider.name));
-        console.warn(`Vision analysis failed with ${provider.name}:`, rawMsg);
-        continue;
+      if (result.success && result.result) {
+        setRawInput(result.result);
+        setEffectiveType("text");
+        setImageDescription(result.result);
+        setVisionExtracted(true);
+        setAnalysisError("");
+        toast.success(`Class diagram analyzed with ${result.provider}!`, { duration: 4000 });
+      } else {
+        const errMsg = result.errors.join(" · ");
+        setAnalysisError(errMsg);
+        toast.error("AI analysis failed — see details below.", { duration: 5000 });
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setAnalysisError(msg);
+      toast.error("AI analysis failed — see details below.", { duration: 5000 });
+    } finally {
+      setIsAnalyzing(false);
+      setAnalysisProvider("");
     }
-
-    setIsAnalyzing(false);
-    setAnalysisProvider("");
-    const errSummary = failedProviders.join(". ") + "." + suggestAlternateProviders(providers);
-    setAnalysisError(errSummary);
-    toast.error("AI analysis failed — see details below. You can still describe the model manually.", { duration: 5000 });
   };
 
   /* ── file upload handling ── */
@@ -866,7 +639,7 @@ export function NewModelPage() {
   const previewType = visionExtracted ? "text" : effectiveType;
   const preview = quickPreview(previewType, previewInput);
 
-  const hasAnyKey = getAvailableVisionProviders().length > 0;
+  const hasAnyKey = getConfiguredKeys().hasAny;
 
   /* ──────────────────── render ──────────────────── */
   return (
